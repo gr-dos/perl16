@@ -1,0 +1,170 @@
+#!/usr/bin/env perl
+
+use 5.036;
+use warnings;
+use autodie qw(open close);
+use File::Basename qw(basename);
+use File::Copy qw(copy);
+use File::Path qw(make_path remove_tree);
+use File::Spec;
+
+=head1 NAME
+
+run-dos - run Perl test scripts with a DOS PERL.EXE under DOSBox-X
+
+=head1 SYNOPSIS
+
+  tests/run-dos PERL.EXE DIR...
+
+=head1 DESCRIPTION
+
+Each F<NAME.pl> in each DIR is a case (NAME at most 8 characters). Its
+expected standard output is F<NAME.out> next to it, compared after CRLF
+is turned into LF. Comment lines at the top of the script can say:
+
+  # status: N        the expected exit status (default 0)
+  # command: ARGS    run PERL ARGS instead of PERL NAME.PL
+  # todo: REASON     a known failure: reported, but not counted as one
+
+Any other file in DIR is a fixture, copied into the work directory
+under its name in upper case.
+
+DOS cannot redirect standard error, so a script that needs its
+diagnostics checked starts with C<open(STDERR, "E<gt>&STDOUT")>.
+
+Each case runs in its own DOSBox-X session, on an emulated 8086 (core
+normal, cputype 8086, CGA machine) with C: mounted on a work directory
+(F<build/run-dos>) holding PERL.EXE and the cases, and is killed if it
+takes longer than DOSBOX_TIMEOUT seconds. Its output and the result of
+its exit-status check are collected afterwards. Exits 0 if every case
+not marked todo passes.
+
+Environment: DOSBOX (default dosbox-x), DOSBOX_TIMEOUT seconds per case
+(default 60), KEEP=1 to keep the work directory.
+
+=cut
+
+my ($exe, @dirs) = @ARGV;
+die "usage: $0 PERL.EXE DIR...\n" unless @dirs;
+die "$exe not found\n" unless -f $exe;
+my $dosbox = $ENV{DOSBOX} // 'dosbox-x';
+my $timeout = $ENV{DOSBOX_TIMEOUT} // 60;
+
+my $work = File::Spec->rel2abs('build/run-dos');
+remove_tree($work);
+make_path($work);
+copy($exe, "$work/PERL.EXE") or die "copy $exe: $!\n";
+
+sub slurp ($f) { open my $h, '<:raw', $f; local $/; my $s = <$h>; close $h; $s }
+
+my (@cases, %seen);
+for my $dir (@dirs) {
+    for my $pl (sort glob "$dir/*.pl") {
+        my $name = uc basename($pl, '.pl');
+        die "$pl: name longer than 8 characters\n" if length $name > 8;
+        die "$pl: $name is used twice\n" if $seen{$name}++;
+        my %case = (name => $name, file => $pl, status => 0,
+                    command => "PERL $name.PL");
+        for (split /\n/, slurp($pl)) {
+            last unless /^#/;
+            $case{status}  = $1 if /^#\s*status:\s*(\d+)/;
+            $case{command} = "PERL $1" if /^#\s*command:\s*(.+?)\s*$/;
+            $case{todo}    = $1 if /^#\s*todo:\s*(.+?)\s*$/;
+        }
+        (my $exp = $pl) =~ s/\.pl$/.out/;
+        die "$pl: no $exp\n" unless -f $exp;
+        $case{expect} = slurp($exp);
+        copy($pl, "$work/$name.PL") or die "copy $pl: $!\n";
+        push @cases, \%case;
+    }
+}
+die "no cases\n" unless @cases;
+
+# Any other file in a case directory is a fixture, copied as it is under
+# its name in upper case.
+for my $dir (@dirs) {
+    for my $f (grep { -f && !/\.(pl|out)$/ } glob "$dir/*") {
+        my $name = uc basename($f);
+        die "$f: $name is used twice\n" if $seen{$name}++;
+        copy($f, "$work/$name") or die "copy $f: $!\n";
+    }
+}
+
+# Each case runs in its own DOSBox-X session, so one that hangs is
+# killed after DOSBOX_TIMEOUT seconds without stopping the others. Its
+# exit status N passes when errorlevel >= N and not >= N + 1.
+open my $cnf, '>', "$work/DOSBOX.CNF";
+print $cnf <<~"END";
+  [sdl]
+  output=surface
+  [dosbox]
+  machine=cga
+  [cpu]
+  core=normal
+  cputype=8086
+  [autoexec]
+  mount c "$work"
+  c:
+  call RUN.BAT
+  exit
+  END
+close $cnf;
+
+for my $c (@cases) {
+    my ($n, $st) = @$c{qw(name status)};
+    my @bat = ('@echo off', "$c->{command} >$n.OUT");
+    push @bat, sprintf 'if errorlevel %d goto f', $st + 1 if $st < 255;
+    push @bat, "if not errorlevel $st goto f";
+    push @bat, "echo ok >$n.RC", 'goto d', ':f', "echo bad >$n.RC", ':d';
+    open my $b, '>:raw', "$work/RUN.BAT";
+    print $b map { "$_\r\n" } @bat;
+    close $b;
+
+    local $ENV{SDL_VIDEODRIVER} = 'dummy';
+    local $ENV{SDL_AUDIODRIVER} = 'dummy';
+    my $rc = system('sh', '-c', 'exec "$@" >"$0" 2>&1', "$work/$n.LOG",
+        'timeout', '-s', 'KILL', $timeout,
+        $dosbox, '-nogui', '-nomenu', '-conf', "$work/DOSBOX.CNF");
+    $c->{timedout} = 1 if $rc >> 8 == 137;
+}
+# DOSBox-X may give a file it made any case.
+my %dosfile = map { uc(basename($_)) => $_ } glob "$work/*";
+
+my ($pass, $fail, $todo) = (0, 0, 0);
+for my $c (@cases) {
+    my $n = $c->{name};
+    my @why;
+    my $rc = $dosfile{"$n.RC"};
+    my $out = $dosfile{"$n.OUT"};
+    if (!defined $rc) {
+        push @why, $c->{timedout} ? "timed out after ${timeout}s" : "did not finish";
+    } else {
+        push @why, "exit status is not $c->{status}"
+            unless slurp($rc) =~ /^ok/;
+        my $got = defined $out ? slurp($out) =~ s/\r\n/\n/gr : '';
+        push @why, 'output differs' unless $got eq $c->{expect};
+        if ($got ne $c->{expect}) {
+            open my $g, '>:raw', "$work/$n.GOT";
+            print $g $got;
+            close $g;
+        }
+    }
+    if (!@why) {
+        if ($c->{todo}) {
+            say "$n: passes, but is marked todo ($c->{todo})";
+        }
+        $pass++;
+    } elsif ($c->{todo}) {
+        say "$n: todo: $c->{todo} (" . join('; ', @why) . ')';
+        $todo++;
+    } else {
+        say "$n: FAIL: " . join('; ', @why) . " ($c->{file})";
+        $fail++;
+    }
+}
+
+say "run-dos: $pass passed, $fail failed, $todo todo";
+say "run-dos: work directory $work (output of failures in NAME.GOT)"
+    if $fail || $todo || $ENV{KEEP};
+remove_tree($work) unless $fail || $todo || $ENV{KEEP};
+exit($fail ? 1 : 0);

@@ -1,0 +1,37 @@
+#!/bin/sh
+#
+# Fetch the perl16 baseline, Perl 3.044 (perl 3.0 patch level 44, 1991),
+# into DIR: clone tag perl-3.044 of the Perl repository, check that it is
+# the commit and tree below, export that tree as DIR, and check every file
+# against upstream/MANIFEST.sha256. Reuses DIR if it already holds that tree.
+#
+# usage: scripts/fetch-upstream [DIR]     (default: build/upstream/perl-3.044)
+#
+# PERL_GIT, if set, is cloned instead (a mirror, or a local perl5 clone);
+# it must yield the same commit and tree.
+
+set -eu
+
+tag=perl-3.044
+commit=27e2fb84680b9cc1db17238d5bf10b97626f477f
+tree=39824ce086ad815a976233d0edef5992b06e833c
+
+repo=${PERL_GIT:-https://github.com/Perl/perl5.git}
+dir=${1:-build/upstream/$tag}
+manifest=$(cd "$(dirname "$0")/.." && pwd)/upstream/MANIFEST.sha256
+stamp="$dir/.git-tree"
+
+if [ "$(cat "$stamp" 2>/dev/null)" != "$tree" ]; then
+  mkdir -p "$(dirname "$dir")"
+  git="$dir.git"
+  rm -rf "$git" "$dir" "$dir.tmp"
+  git clone -q --bare --depth 1 --branch "$tag" "$repo" "$git"
+  [ "$(git --git-dir="$git" rev-parse "$tag^{commit}")" = "$commit" ]
+  [ "$(git --git-dir="$git" rev-parse "$tag^{tree}")" = "$tree" ]
+  mkdir -p "$dir.tmp"
+  git --git-dir="$git" archive "$commit" | tar -x -C "$dir.tmp"
+  rm -rf "$git"
+  (cd "$dir.tmp" && sha256sum -c --quiet "$manifest")
+  mv "$dir.tmp" "$dir"
+  echo "$tree" > "$stamp"
+fi

@@ -1,0 +1,35 @@
+#!/bin/sh
+#
+# Generate perl.c and perly.h from perl.y in DIR, as Perl 3.044's
+# Makefile.SH does (yacc -d; mv y.tab.c perl.c; mv y.tab.h perly.h; append
+# "extern YYSTYPE yylval;"), with bison in yacc mode. Tag perl-3.044 ships
+# neither file.
+#
+# Fails unless the grammar's conflicts are one of the two outcomes
+# Makefile.SH says to expect (29 shift/reduce and 59 reduce/reduce, or 27
+# and 61), so a yacc that resolves the grammar differently is noticed.
+# The generated code depends on the bison version; docs/M0-AUDIT.md
+# records the one used.
+#
+# usage: scripts/yacc-perl DIR
+# YACC, if set, is used instead of "bison -y".
+
+set -eu
+
+dir=$1
+yacc=${YACC:-bison -y}
+
+cd "$dir"
+rm -f y.tab.c y.tab.h perl.c perly.h
+$yacc -d perl.y 2> yacc.log || { cat yacc.log >&2; exit 1; }
+sr=$(sed -n 's/.* \([0-9][0-9]*\) shift\/reduce conflict.*/\1/p' yacc.log)
+rr=$(sed -n 's/.* \([0-9][0-9]*\) reduce\/reduce conflict.*/\1/p' yacc.log)
+case "$sr/$rr" in
+29/59|27/61) ;;
+*) echo "yacc-perl: unexpected conflicts ($sr s/r, $rr r/r)" >&2
+   cat yacc.log >&2
+   exit 1 ;;
+esac
+mv y.tab.c perl.c
+mv y.tab.h perly.h
+echo 'extern YYSTYPE yylval;' >> perly.h
