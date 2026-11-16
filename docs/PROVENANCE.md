@@ -29,20 +29,32 @@ its reasons.
 | `0002-watcom-compile.patch` | perl16 | `cons.c`, `eval.c`, `msdos/config.h`, `msdos/directory.c`, `msdos/msdos.c`, `msdos/popen.c`, `perl.h`, `perly.c`, `toke.c`, `util.h` | compile under Open Watcom C with its headers |
 | `0003-watcom-varargs.patch` | perl16 | `perl.h` | prototypes for the `<varargs.h>` functions, for Watcom's calling convention |
 | `0004-watcom-environ.patch` | perl16 | `perly.c` | take the environment from `environ`, since Watcom passes `main()` none |
+| `0005-16bit-int.patch` | perl16 | `doarg.c`, `eval.c`, `hash.c`, `perl.h` | 16-bit `int` defects: `pack`/`unpack` `N`, `pack` casts, `vec()` 16/32, hash growth past 512 buckets, `sleep` |
+| `0006-str-gets.patch` | perl16 | `str.c` | `str_gets()`: a 512-byte buffer in place of 8 KB of DGROUP, and lines with NUL bytes kept whole |
+| `0007-dos-inc-etemp.patch` | perl16 | `perly.c` | `@INC` from `PERL.EXE`'s directory, the `-e` file in `TEMP`/`TMP` created exclusively, `-P` refused |
+| `0008-dos-glob.patch` | perl16 | `msdos/popen.c` | `<*.c>` without a helper program |
 
 ## Generated files
 
 `perl.c` and `perly.h` are generated from `perl.y` by `scripts/yacc-perl`
 (bison in yacc mode), as upstream's `Makefile.SH` does. They aren't
-stored.
+stored. The parser is pinned: the script requires GNU Bison 3.8.2
+(`bison-3.8.2.tar.xz`, sha256
+`9bba0214ccf7f1079c5d59210045227bcf619519840ebfa80cd3849cff5a5bf2`,
+signed by key `7DF84374B1EE1F9764BBE25D0DDCAA3278D5264E`), and checks
+both files against `upstream/parser.sha256`. The script's header gives
+the procedure for changing the pin.
 
 ## perl16's own files
 
 | File | Purpose |
 |---|---|
-| `msdos/mktemp.c` | `mktemp()`, which neither Open Watcom's runtime nor libc16 has |
-| `msdos/stk16.asm` | a stack check with a guard margin that reports overflow on stderr; M1 experiment, not in the default build (docs/M1-REPORT.md) |
+| `msdos/exepath.c`, `exepath.h` | the directory `PERL.EXE` was loaded from, for `@INC` (docs/M2-REPORT.md, section 5) |
+| `msdos/etemp.c`, `etemp.h` | the `-e` temporary file (docs/M2-REPORT.md, section 6) |
+| `msdos/dosglob.c`, `dosglob.h` | filename globbing (docs/M2-REPORT.md, section 7) |
+| `msdos/stk16.asm` | the stack check: a guard margin, and overflow reported on standard error with status 255; in the default build since M2 (docs/M2-REPORT.md, section 4) |
 | `msdos/sswitch.c`, `msdos/brk16.asm` | running Perl on a stack segment of its own (SS != DS); M1 experiment, not in the default build |
 | `scripts/*`, `tests/*`, `Makefile` | build, audit and test tooling |
+| `upstream/*.sha256` | hashes of the upstream source, reference material and generated parser |
 
 Their license is still to be chosen (docs/M0-AUDIT.md, section 3).

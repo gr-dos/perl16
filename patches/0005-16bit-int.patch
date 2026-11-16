@@ -1,0 +1,146 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Graham Ollis <plicease@cpan.org>
+Date: Mon, 16 Nov 2026 09:00:00 -0700
+Subject: [PATCH] Fix 16-bit int defects: pack, vec 16/32, hash growth,
+ sleep
+
+Defects in upstream code that show with any 16-bit int
+(docs/M0-AUDIT.md, section 9; tests/smoke/packn.pl, vec32.pl,
+hashbig.pl).
+
+- perl.h: declare my_htonl() and my_ntohl() (and my_swap()). They
+  return long but were called undeclared, so pack("N") and unpack("N")
+  kept only the low 16 bits.
+- doarg.c: pack() converted numbers for "c", "C", "s", "S", "n" and "i"
+  with (int) or (short) casts of a double, which Open Watcom does with a
+  16-bit conversion that gives 0x8000 for anything out of range, so
+  pack("n", 65535) packed 32768. Convert through long, which gives the
+  same bits as a 32-bit int did.
+- doarg.c: vec() with a width of 16 or 32 shifted an unsigned char,
+  promoted to a 16-bit int, by 8, 16 and 24 bits. Width 32 lost its top
+  half, and width 16 went negative (then huge) for values from 0x8000.
+  Shift unsigned long instead.
+- hash.c: hsplit() computed the split threshold tbl_max * FILLPCT in a
+  16-bit int, which overflows at 512 buckets; every later store split
+  the table again until "Reallocation too large". Compute it in long.
+  Under MSDOS, also stop doubling the table before it would exceed one
+  64 KB block (8,192 buckets); the chains get longer after that.
+- eval.c: sleep with no argument computed (32767<<16)+32767 in an int.
+  Use the largest unsigned int.
+---
+ doarg.c | 15 ++++++++-------
+ eval.c  |  2 +-
+ hash.c  | 10 +++++++++-
+ perl.h  |  6 ++++++
+ 4 files changed, 24 insertions(+), 9 deletions(-)
+
+diff --git a/doarg.c b/doarg.c
+index 70ff614..344d142 100644
+--- a/doarg.c
++++ b/doarg.c
+@@ -640,7 +640,7 @@ int *arglast;
+ 	case 'c':
+ 	    while (len-- > 0) {
+ 		fromstr = NEXTFROM;
+-		aint = (int)str_gnum(fromstr);
++		aint = (int)(long)str_gnum(fromstr);
+ 		achar = aint;
+ 		str_ncat(str,&achar,sizeof(char));
+ 	    }
+@@ -665,7 +665,7 @@ int *arglast;
+ 	case 'n':
+ 	    while (len-- > 0) {
+ 		fromstr = NEXTFROM;
+-		ashort = (short)str_gnum(fromstr);
++		ashort = (short)(long)str_gnum(fromstr);
+ #ifdef HTONS
+ 		ashort = htons(ashort);
+ #endif
+@@ -676,7 +676,7 @@ int *arglast;
+ 	case 's':
+ 	    while (len-- > 0) {
+ 		fromstr = NEXTFROM;
+-		ashort = (short)str_gnum(fromstr);
++		ashort = (short)(long)str_gnum(fromstr);
+ 		str_ncat(str,(char*)&ashort,sizeof(short));
+ 	    }
+ 	    break;
+@@ -690,7 +690,7 @@ int *arglast;
+ 	case 'i':
+ 	    while (len-- > 0) {
+ 		fromstr = NEXTFROM;
+-		aint = (int)str_gnum(fromstr);
++		aint = (int)(long)str_gnum(fromstr);
+ 		str_ncat(str,(char*)&aint,sizeof(int));
+ 	    }
+ 	    break;
+@@ -1398,10 +1398,11 @@ int *arglast;
+ 	    if (size == 8)
+ 		retnum = s[offset];
+ 	    else if (size == 16)
+-		retnum = (s[offset] << 8) + s[offset+1];
++		retnum = ((unsigned long)s[offset] << 8) + s[offset+1];
+ 	    else if (size == 32)
+-		retnum = (s[offset] << 24) + (s[offset + 1] << 16) +
+-			(s[offset + 2] << 8) + s[offset+3];
++		retnum = ((unsigned long)s[offset] << 24) +
++			((unsigned long)s[offset + 1] << 16) +
++			((unsigned long)s[offset + 2] << 8) + s[offset+3];
+ 	}
+ 
+ 	if (lvalue) {                      /* it's an lvalue! */
+diff --git a/eval.c b/eval.c
+index 10e811b..bc573cb 100644
+--- a/eval.c
++++ b/eval.c
+@@ -1389,7 +1389,7 @@ register int sp;
+ 	    tmps = str_get(st[1]);
+ 	(void)time(&when);
+ 	if (!tmps || !*tmps)
+-	    sleep((32767<<16)+32767);
++	    sleep((unsigned int)~0);
+ 	else
+ 	    sleep((unsigned int)atoi(tmps));
+ #ifndef lint
+diff --git a/hash.c b/hash.c
+index 73ac5b9..340ae49 100644
+--- a/hash.c
++++ b/hash.c
+@@ -293,11 +293,19 @@ HASH *tb;
+     register HENT *entry;
+     register HENT **oentry;
+ 
++#ifdef MSDOS
++    /* A block can't exceed 64 KB, so stop doubling the table before it
++     * would; from then on the chains get longer instead. */
++    if ((unsigned long)newsize * sizeof(HENT*) > 0xffffL) {
++	tb->tbl_dosplit = 32767;
++	return;
++    }
++#endif
+     a = tb->tbl_array;
+     Renew(a, newsize, HENT*);
+     Zero(&a[oldsize], oldsize, HENT*);		/* zero 2nd half*/
+     tb->tbl_max = --newsize;
+-    tb->tbl_dosplit = tb->tbl_max * FILLPCT / 100;
++    tb->tbl_dosplit = (int)((long)tb->tbl_max * FILLPCT / 100);
+     tb->tbl_array = a;
+ 
+     for (i=0; i<oldsize; i++,a++) {
+diff --git a/perl.h b/perl.h
+index 0779473..51bc0c3 100644
+--- a/perl.h
++++ b/perl.h
+@@ -537,6 +537,12 @@ int deb(void *, ...);
+ #endif
+ #endif
+ 
++#ifdef MYSWAP
++short my_swap();
++long my_htonl();
++long my_ntohl();
++#endif
++
+ #ifdef CASTNEGFLOAT
+ #define U_S(what) ((unsigned short)(what))
+ #define U_I(what) ((unsigned int)(what))

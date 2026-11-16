@@ -1,0 +1,104 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Graham Ollis <plicease@cpan.org>
+Date: Mon, 16 Nov 2026 10:00:00 -0700
+Subject: [PATCH] MS-DOS: @INC from PERL.EXE's directory, a safe -e file,
+ no -P
+
+Three changes to perly.c's main(), all under MSDOS, calling perl16's
+own msdos/exepath.c and msdos/etemp.c (docs/M2-REPORT.md, sections 5
+and 6).
+
+- @INC is -I directories, then <directory of PERL.EXE>\LIB, then ".",
+  in place of PRIVLIB (/usr/local/lib/perl). The directory comes from
+  the pathname DOS 3.0 and later put after the environment, made
+  absolute, or from argv[0]; if neither gives one, that entry is left
+  out.
+- -e writes its lines to a file created exclusively (INT 21h, 5Bh) in
+  TEMP, TMP or the current directory, the first that works, in place of
+  mktemp("plXXXXXX") in the current directory, which raced and failed
+  on a read-only drive (issues #3 and #4). The error says which
+  directory failed and why, and a failure to write or close the file is
+  an error rather than a short script.
+- -P is a fatal error. It pipes the script through sed and "cc -{",
+  which a DOS system doesn't have, and failed with a less helpful
+  message.
+---
+ perly.c | 31 +++++++++++++++++++++++++++++++
+ 1 file changed, 31 insertions(+)
+
+diff --git a/perly.c b/perly.c
+index c048b42..4b85353 100644
+--- a/perly.c
++++ b/perly.c
+@@ -66,6 +66,10 @@ char rcsid[] = "$Header: perly.c,v 3.0.1.10 91/01/11 18:22:48 lwall Locked $\nPa
+ #include "perl.h"
+ #include "perly.h"
+ #include "patchlevel.h"
++#ifdef MSDOS
++#include "exepath.h"
++#include "etemp.h"
++#endif
+ 
+ #ifdef IAMSUID
+ #ifndef DOSUID
+@@ -176,11 +180,20 @@ setuid perl scripts securely.\n");
+ 		fatal("No -e allowed in setuid scripts");
+ #endif
+ 	    if (!e_fp) {
++#ifdef MSDOS
++		const char *where;
++
++		e_fp = perl16_etemp(&e_tmpname, &where);
++		if (!e_fp)
++		    fatal("Can't create temporary file for -e in %s: %s\n",
++		      where, strerror(errno));
++#else
+ 	        e_tmpname = savestr(TMPPATH);
+ 		(void)mktemp(e_tmpname);
+ 		e_fp = fopen(e_tmpname,"w");
+ 		if (!e_fp)
+ 		    fatal("Cannot open temporary file");
++#endif
+ 	    }
+ 	    if (argv[1]) {
+ 		fputs(argv[1],e_fp);
+@@ -210,6 +223,9 @@ setuid perl scripts securely.\n");
+ #ifdef TAINT
+ 	    if (euid != uid || egid != gid)
+ 		fatal("No -P allowed in setuid scripts");
++#endif
++#ifdef MSDOS
++	    fatal("-P is not supported on MS-DOS (it needs sed and a C preprocessor)\n");
+ #endif
+ 	    preprocess = TRUE;
+ 	    s++;
+@@ -243,14 +259,29 @@ setuid perl scripts securely.\n");
+     }
+   switch_end:
+     if (e_fp) {
++#ifdef MSDOS
++	int bad = ferror(e_fp);
++
++	if ((fclose(e_fp) == EOF) | bad)
++	    fatal("Can't write temporary file %s for -e\n", e_tmpname);
++#else
+ 	(void)fclose(e_fp);
++#endif
+ 	argc++,argv--;
+ 	argv[0] = e_tmpname;
+     }
++#ifdef MSDOS
++    /* <directory of PERL.EXE>\LIB in place of PRIVLIB (msdos/exepath.c) */
++    if (s = perl16_libdir(origargv[0])) {
++	(void)apush(stab_array(incstab),str_make(s,0));
++	Safefree(s);
++    }
++#else
+ #ifndef PRIVLIB
+ #define PRIVLIB "/usr/local/lib/perl"
+ #endif
+     (void)apush(stab_array(incstab),str_make(PRIVLIB,0));
++#endif
+     (void)apush(stab_array(incstab),str_make(".",1));
+ 
+     str_set(&str_no,No);

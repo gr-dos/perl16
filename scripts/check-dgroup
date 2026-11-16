@@ -1,0 +1,48 @@
+#!/usr/bin/env perl
+
+use 5.036;
+use warnings;
+
+=head1 NAME
+
+check-dgroup - check that a linked PERL.EXE leaves DGROUP room to spare
+
+=head1 SYNOPSIS
+
+  scripts/check-dgroup perl.map MIN_FREE
+
+=head1 DESCRIPTION
+
+Reads an Open Watcom linker map and prints the size of DGROUP, of its
+stack, and what is left of its 64 KB. Fails if fewer than MIN_FREE bytes
+are left.
+
+The stack lives in DGROUP (SS = DS), and the near heap grows into
+whatever DGROUP has left above it. Open Watcom's runtime needs some near
+heap to start a child process: with 64 bytes left, C<system> and
+backticks fail, with 1,088 they work (docs/M1-REPORT.md, section 5.4).
+The Makefile sizes the stack to leave DGROUP_MIN_FREE bytes, and this
+check makes a change that eats into that margin (more static data, say)
+fail the build rather than child processes.
+
+=cut
+
+my ($map, $min) = @ARGV;
+die "usage: $0 perl.map MIN_FREE\n" unless defined $min;
+open my $fh, '<', $map or die "$map: $!\n";
+my ($dgroup, $stack);
+while (<$fh>) {
+    $dgroup = hex $1 if /^DGROUP\s+\S+\s+([0-9a-f]+)\s*$/i;
+    $stack  = hex $1 if /^STACK\s+STACK\s+DGROUP\s+\S+\s+([0-9a-f]+)\s*$/i;
+}
+close $fh;
+die "$map: no DGROUP\n" unless defined $dgroup;
+die "$map: no STACK segment\n" unless defined $stack;
+my $free = 65536 - $dgroup;
+printf "check-dgroup: DGROUP %d bytes (stack %d, static data %d), %d free\n",
+    $dgroup, $stack, $dgroup - $stack, $free;
+if ($free < $min) {
+    printf STDERR "check-dgroup: only %d bytes of DGROUP free, need %d;"
+        . " make the stack smaller (make STACK=...)\n", $free, $min;
+    exit 1;
+}

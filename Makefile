@@ -3,7 +3,9 @@
 #
 #   make             build/dev/PERL.EXE, the development build (below)
 #   make test        smoke tests of build/dev/PERL.EXE under DOSBox-X,
-#                    on an emulated 8086 (tests/run-dos)
+#                    on an emulated 8086 (tests/run-dos), and tests of
+#                    it installed on other drives and directories
+#                    (tests/run-install)
 #   make test-t      Perl 3.044's own t/ suite under DOSBox-X, checked
 #                    against tests/t-baseline.txt (tests/run-t)
 #   make variants    the M1 experimental builds in build/var (below),
@@ -46,39 +48,62 @@ WATCOM_ENV   = . ./$(TOOLS_ENV) && PATH=$$WATCOM/binl64:$$PATH
 PERL_NAMES  = array cmd cons consarg doarg doio dolist dump eval form hash \
               perl perly regcomp regexec stab str toke util
 PORT_NAMES  = msdos popen directory
-# perl16's own, in msdos/.
-P16_NAMES   = mktemp
+# perl16's own, in msdos/: the executable's directory for @INC, the -e
+# temporary file, and globbing (docs/M2-REPORT.md).
+P16_NAMES   = exepath etemp dosglob
+P16_HEADERS = $(wildcard msdos/*.h)
 
 # Development build: large model, 8086 instructions, Open Watcom's headers
 # and runtime. -zc puts string literals in the code segment; without it
-# DGROUP overflows (docs/M0-AUDIT.md, section 6). The 32 KB stack is the
-# historical port's (/stack:32767).
+# DGROUP overflows (docs/M0-AUDIT.md, section 6).
+#
+# The stack (docs/M2-REPORT.md, section 4): -DCRIPPLED_CC, as the
+# historical port was built, makes str_get, str_gnum and str_true
+# functions, which shrinks eval()'s frame from 780 to 186 bytes;
+# msdos/stk16.asm replaces Open Watcom's __STK with a check that keeps
+# STK16_MARGIN bytes in reserve and reports overflow on standard error
+# with exit status 255; and the stack is as large as DGROUP allows while
+# leaving DGROUP_MIN_FREE bytes free for the near heap, which child
+# processes need (scripts/check-dgroup checks the map).
 CC          = wcc
-DEV_CFLAGS  = -q -zq -ml -0 -zc -bt=dos -DMSDOS -I$(SRC) -I$$WATCOM/h
-DEV_LDOPTS  = option quiet, stack=32k
+AS          = wasm
+STACK       ?= 51k
+STK16_MARGIN ?= 2048
+DGROUP_MIN_FREE ?= 2048
+DEV_CFLAGS  = -q -zq -ml -0 -zc -bt=dos -DMSDOS -DCRIPPLED_CC -I$(SRC) \
+              -Imsdos -I$$WATCOM/h
+DEV_AFLAGS  = -q -ml -0 -dSTK16_MARGIN=$(STK16_MARGIN)
+DEV_LDOPTS  = disable 1027 option quiet, stack=$(STACK)
 
-DEV_OBJS    = $(PERL_NAMES:%=$(DEV)/%.obj) $(PORT_NAMES:%=$(DEV)/%.obj) \
-              $(P16_NAMES:%=$(DEV)/%.obj)
+DEV_OBJS    = $(DEV)/stk16.obj $(PERL_NAMES:%=$(DEV)/%.obj) \
+              $(PORT_NAMES:%=$(DEV)/%.obj) $(P16_NAMES:%=$(DEV)/%.obj)
 PATCHES     = $(sort $(wildcard patches/*.patch))
 
 all: $(DEV)/PERL.EXE
 
-$(DEV)/PERL.EXE: $(DEV_OBJS) $(TOOLS_ENV)
+$(DEV)/PERL.EXE: $(DEV_OBJS) $(TOOLS_ENV) scripts/check-dgroup Makefile
 	$(WATCOM_ENV) && wlink $(DEV_LDOPTS), map=$(DEV)/perl.map \
-	  system dos name $@ $(DEV_OBJS:%=file %)
+	  system dos name $@.tmp $(DEV_OBJS:%=file %)
+	perl scripts/check-dgroup $(DEV)/perl.map $(DGROUP_MIN_FREE)
+	mv $@.tmp $@
 
-$(DEV)/%.obj: $(SRC)/%.c $(SRC)/.stamp $(TOOLS_ENV)
+$(DEV)/%.obj: msdos/%.asm $(TOOLS_ENV) Makefile
+	mkdir -p $(DEV)
+	$(WATCOM_ENV) && $(AS) $(DEV_AFLAGS) -fo=$@ $<
+
+$(DEV)/%.obj: $(SRC)/%.c $(SRC)/.stamp $(P16_HEADERS) $(TOOLS_ENV) Makefile
 	mkdir -p $(DEV)
 	$(WATCOM_ENV) && $(CC) $(DEV_CFLAGS) -fo=$@ $<
 
-$(DEV)/%.obj: msdos/%.c $(TOOLS_ENV)
+$(DEV)/%.obj: msdos/%.c $(P16_HEADERS) $(TOOLS_ENV) Makefile
 	mkdir -p $(DEV)
 	$(WATCOM_ENV) && $(CC) $(DEV_CFLAGS) -fo=$@ $<
 
 $(SRC)/%.c: $(SRC)/.stamp ;
 
 # The assembled source tree.
-$(SRC)/.stamp: $(UPSTREAM)/.git-tree $(PATCHES) scripts/yacc-perl
+$(SRC)/.stamp: $(UPSTREAM)/.git-tree $(PATCHES) scripts/yacc-perl \
+  upstream/parser.sha256
 	rm -rf $(SRC) $(SRC).tmp
 	cp -R $(UPSTREAM) $(SRC).tmp
 	rm -f $(SRC).tmp/.git-tree
@@ -105,8 +130,8 @@ $(TOOLS_ENV): $(LIBC16L)
 	watcom=$$(sh $(LIBC16_DIR)/tools/fetch-watcom $(CURDIR)/build/tools) \
 	  && printf 'WATCOM=%s\nexport WATCOM\n' "$$watcom" > $@
 
-# M1 measurement variants (docs/M1-REPORT.md); dev is build/dev/PERL.EXE
-# built again.
+# M1 measurement variants (docs/M1-REPORT.md); dev is the M1 development
+# build (32 KB stack, no CRIPPLED_CC, Open Watcom's __STK), not build/dev.
 VARIANTS    = dev nochk os ox crip stk46 margin rec ss64
 
 variants: $(SRC)/.stamp $(TOOLS_ENV)
@@ -125,8 +150,30 @@ measure: variants $(UPSTREAM)/.git-tree
 	perl scripts/mem-probe build/var/FREEMEM.EXE $(UPSTREAM) \
 	  build/var/dev/PERL.EXE build/var/ss64/PERL.EXE
 
-test: $(DEV)/PERL.EXE
+# DOS tools for tests/run-install: unit tests of perl16's own code, built
+# like PERL.EXE, and ERR2OUT.EXE, which lets a test see standard error.
+# Like PERL.EXE, never to be published.
+TEST_TOOLS  = $(DEV)/EXETEST.EXE $(DEV)/ETEMPTST.EXE $(DEV)/ERR2OUT.EXE
+
+$(DEV)/EXETEST.EXE: tests/tools/exetest.c $(DEV)/exepath.obj $(P16_HEADERS) \
+  $(TOOLS_ENV)
+	$(WATCOM_ENV) && $(CC) $(DEV_CFLAGS) -fo=$(DEV)/exetest.obj $< && \
+	  wlink option quiet system dos name $@ file $(DEV)/exetest.obj \
+	  file $(DEV)/exepath.obj
+
+$(DEV)/ETEMPTST.EXE: tests/tools/etemptst.c msdos/etemp.c $(P16_HEADERS) \
+  $(TOOLS_ENV)
+	$(WATCOM_ENV) && $(CC) $(DEV_CFLAGS) -fo=$(DEV)/etemptst.obj $< && \
+	  wlink option quiet system dos name $@ file $(DEV)/etemptst.obj
+
+$(DEV)/ERR2OUT.EXE: tests/tools/err2out.c $(TOOLS_ENV)
+	$(WATCOM_ENV) && $(CC) -q -zq -ms -0 -bt=dos -I$$WATCOM/h \
+	  -fo=$(DEV)/err2out.obj $< && \
+	  wlink option quiet system dos name $@ file $(DEV)/err2out.obj
+
+test: $(DEV)/PERL.EXE $(TEST_TOOLS)
 	perl tests/run-dos $(DEV)/PERL.EXE tests/smoke
+	perl tests/run-install $(DEV)/PERL.EXE $(TEST_TOOLS)
 
 test-t: $(DEV)/PERL.EXE $(UPSTREAM)/.git-tree
 	perl tests/run-t $(DEV)/PERL.EXE $(UPSTREAM) tests/t-baseline.txt

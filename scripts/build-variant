@@ -2,7 +2,9 @@
 #
 # Build one experimental variant of the development PERL.EXE, for the M1
 # measurements (docs/M1-REPORT.md). Like build/dev/PERL.EXE it is linked
-# with Open Watcom's runtime and must never be published.
+# with Open Watcom's runtime and must never be published. The variants
+# are built from the current source (patches/ and msdos/), so their
+# figures move with it; docs/M1-REPORT.md has them as M1 measured them.
 #
 # usage: scripts/build-variant NAME
 #
@@ -10,7 +12,7 @@
 # assembled source in build/src (make builds it). Needs WATCOM and wcc,
 # wlink and wasm on PATH (make variants arranges it).
 #
-#   dev      as build/dev/PERL.EXE: default optimisation, stack checks,
+#   dev      the M1 development build: default optimisation, stack checks,
 #            32 KB stack in DGROUP
 #   nochk    -s: no stack checks
 #   os       -os: optimise for size
@@ -32,7 +34,7 @@ set -eu
 name=$1
 src=build/src
 out=build/var/$name
-base="-q -zq -ml -0 -zc -bt=dos -DMSDOS -I$src -I$WATCOM/h"
+base="-q -zq -ml -0 -zc -bt=dos -DMSDOS -I$src -Imsdos -I$WATCOM/h"
 extra=
 stack=32k
 objs=
@@ -73,8 +75,10 @@ for n in $names; do
   wcc $base $extra $renames $def -fo="$out/$n.obj" "$src/$n.c" 2>/dev/null
   files="$files file $out/$n.obj"
 done
-wcc $base $extra -fo="$out/mktemp.obj" msdos/mktemp.c
-files="$files file $out/mktemp.obj"
+for n in exepath etemp dosglob; do
+  wcc $base $extra -fo="$out/$n.obj" "msdos/$n.c"
+  files="$files file $out/$n.obj"
+done
 wlink option quiet, stack=$stack, map="$out/perl.map" \
   system dos name "$out/PERL.EXE" $files 2>&1 | grep -v 'W1027' || true
 [ -f "$out/PERL.EXE" ]

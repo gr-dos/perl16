@@ -405,6 +405,8 @@ needs 64 KB of conventional memory more.
 
 ## 7. Follow-up work
 
+(M2 did the M2 items below: docs/M2-REPORT.md, section 4.)
+
 Separate from M1, for M2 unless noted:
 
 - Link a reporting stack check in the development build: `stk16.asm`, maybe with a cheaper check (it reloads DS on every call).

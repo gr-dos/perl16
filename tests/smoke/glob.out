@@ -1,0 +1,10 @@
+GL\a.txt GL\ab.txt GL\b.txt
+gl/a.txt gl/ab.txt gl/b.txt gl/c.dat gl/noext gl/sub
+GL\noext GL\sub
+GL\a.txt GL\b.txt
+0
+GL\c.dat plain
+GL/a.txt GL/ab.txt
+3
+rs ok
+gone

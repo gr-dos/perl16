@@ -1,0 +1,19 @@
+fork: Unsupported function fork
+wait: Unsupported function wait
+kill 1, $$: Unsupported function kill
+alarm 1: Unsupported function alarm
+umask 022: Unsupported function umask
+chown 0, 0, "X": Unsupported function chown
+link("A", "B"): Unsupported function link
+symlink("A", "B"): Unsupported function symlink
+readlink("A"): Unsupported function readlink
+chroot("\\"): Unsupported function chroot
+getppid: Unsupported function getppid
+pipe(R, W): Unsupported function pipe
+socket(S, 2, 1, 0): Unsupported socket function
+getpwnam("root"): Unsupported password function
+getgrnam("wheel"): Unsupported group function
+getlogin: Unsupported function getlogin
+truncate("X", 0): truncate not implemented
+open(F, "UNSUPP.PL"); -T F: -T and -B not implemented on filehandles
+still running

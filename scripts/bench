@@ -35,6 +35,8 @@ workloads are:
   hash     300 hash stores and lookups, and a sorted keys (more than 511 keys
            meets the hsplit() defect, docs/M0-AUDIT.md)
   subs     500 subroutine calls with local()
+  read     reading a 60 KB file a line at a time: 600 lines of 60
+           characters and 8 of 3,000 (str_gets(), docs/M2-REPORT.md)
   bigint   t/lib.big from UPSTREAM-DIR (lib/bigint.pl, 246 tests)
 
 A result is checked against the workload's expected last line; a run
@@ -54,6 +56,14 @@ make_path("$work/T", "$work/LIB");
 copy($ticks, "$work/TICKS.EXE") or die "$ticks: $!\n";
 copy("$up/lib/bigint.pl", "$work/LIB/BIGINT.PL") or die "bigint.pl: $!\n";
 copy("$up/t/lib.big", "$work/T/BIGINT.PL") or die "lib.big: $!\n";
+{
+    open my $f, '>:raw', "$work/T/READ.TXT";
+    for my $i (0 .. 607) {
+        my $len = $i % 76 == 75 ? 3000 : 60;
+        print $f substr(('abcdefghij' x 300) . $i, -$len + 1), "\r\n";
+    }
+    close $f;
+}
 
 my %LOAD = (
     startup => ['print "hello\n";', qr/^hello$/m],
@@ -67,9 +77,11 @@ my %LOAD = (
               . ' @k = sort keys %h; print "hash $s ", scalar(@k), "\n";', qr/^hash 44850 300$/m],
     subs    => ['sub f { local($a, $b) = @_; $a + $b; } for ($i = 0; $i < 500; $i++) { $s = &f($s, 1); } print "subs $s\n";',
                 qr/^subs 500$/m],
+    read    => ['open(F, "READ.TXT") || die; while (<F>) { $n++; $c += length($_); } print "read $n $c\n";',
+                qr/^read 608 60000$/m],
     bigint  => [undef, qr/^ok 246$/m],
 );
-my @order = qw(startup arith string regex hash subs bigint);
+my @order = qw(startup arith string regex hash subs read bigint);
 for my $l (@order) {
     next unless defined $LOAD{$l}[0];
     open my $f, '>', "$work/T/\U$l\E.PL";

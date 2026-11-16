@@ -1,0 +1,55 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Graham Ollis <plicease@cpan.org>
+Date: Mon, 16 Nov 2026 09:00:00 -0700
+Subject: [PATCH] str_gets(): a 512-byte buffer, and keep NUL bytes
+
+Without STDSTDIO (patch 0002), str_gets() reads a line a character at a
+time into a static 8 KB buffer, then copies it into the string, looping
+for longer lines. On DOS that buffer was 8 KB of the 64 KB DGROUP, which
+the stack shares (docs/M1-REPORT.md, section 4; issue #9). Under MSDOS
+it is now 512 bytes; lines longer than that take more passes of the
+existing loop.
+
+The copy used str_set() and str_cat(), which stop at a NUL byte, so a
+line read with <FH> from a binary file lost everything after its first
+NUL. Under MSDOS it now copies by length (str_nset(), str_ncat()), as
+the STDSTDIO code does.
+---
+ str.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/str.c b/str.c
+index 7ec76fe..ecb5aaa 100644
+--- a/str.c
++++ b/str.c
+@@ -863,7 +863,11 @@ thats_really_all_folks:
+ #else /* !STDSTDIO */	/* The big, slow, and stupid way */
+ 
+     {
++#ifdef MSDOS
++	static char buf[512];	/* DGROUP is scarce; longer lines loop */
++#else
+ 	static char buf[8192];
++#endif
+ 	char * bpe = buf + sizeof(buf) - 3;
+ 
+ screamer:
+@@ -875,10 +879,18 @@ filler:
+ 	    goto filler;
+ 
+ 	*bp = '\0';
++#ifdef MSDOS
++	/* by length, so a line with a NUL in it is kept whole */
++	if (append)
++	    str_ncat(str, buf, bp - buf);
++	else
++	    str_nset(str, buf, bp - buf);
++#else
+ 	if (append)
+ 	    str_cat(str, buf);
+ 	else
+ 	    str_set(str, buf);
++#endif
+ 	if (i != newline && i != EOF) {
+ 	    append = -1;
+ 	    goto screamer;
