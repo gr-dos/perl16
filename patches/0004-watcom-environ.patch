@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Graham Ollis <plicease@cpan.org>
+Date: Sun, 15 Nov 2026 21:15:00 -0700
+Subject: [PATCH] Take the environment from environ, since Open Watcom
+ passes main() none
+
+Open Watcom's startup (clibl.lib(cmain086)) calls main(argc, argv) with
+argc in AX and argv in CX:BX and no third argument, so Perl 3's env
+parameter is whatever lies in the caller's stack slots. Perl compares it
+with environ, finds them different, sets environ[0] to null (emptying
+the environment of every child process, so PATH and COMSPEC are lost),
+and builds %ENV from the garbage. In the development build that garbage
+happened to end at once, so %ENV was always empty; in other link
+layouts it pointed at unmapped memory, and a script that mentioned eval
+(which makes Perl initialise %ENV whether or not it is used) hung in
+index() on 0xFF bytes. Microsoft C passed the environment to main(), so
+the historical port never saw this (docs/M1-REPORT.md).
+
+main() now uses environ under __WATCOMC__.
+---
+ perly.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/perly.c b/perly.c
+--- a/perly.c
++++ b/perly.c
+@@ -98,6 +98,10 @@
+     char *validarg = "";
+ #endif
+ 
++#ifdef __WATCOMC__
++    env = environ;	/* Open Watcom passes main() no environment */
++#endif
++
+ #ifdef SETUID_SCRIPTS_ARE_SECURE_NOW
+ #ifdef IAMSUID
+ #undef IAMSUID

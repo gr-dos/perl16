@@ -28,6 +28,7 @@ its reasons.
 | `0001-dospatch44.patch` | derived from Diomidis Spinellis's dospatch44 (1999) | `eval.c`, `msdos/config.h`, `msdos/msdos.c`, `perly.c` | the maintenance patch, less its `msdos/Makefile` hunk |
 | `0002-watcom-compile.patch` | perl16 | `cons.c`, `eval.c`, `msdos/config.h`, `msdos/directory.c`, `msdos/msdos.c`, `msdos/popen.c`, `perl.h`, `perly.c`, `toke.c`, `util.h` | compile under Open Watcom C with its headers |
 | `0003-watcom-varargs.patch` | perl16 | `perl.h` | prototypes for the `<varargs.h>` functions, for Watcom's calling convention |
+| `0004-watcom-environ.patch` | perl16 | `perly.c` | take the environment from `environ`, since Watcom passes `main()` none |
 
 ## Generated files
 
@@ -40,6 +41,8 @@ stored.
 | File | Purpose |
 |---|---|
 | `msdos/mktemp.c` | `mktemp()`, which neither Open Watcom's runtime nor libc16 has |
+| `msdos/stk16.asm` | a stack check with a guard margin that reports overflow on stderr; M1 experiment, not in the default build (docs/M1-REPORT.md) |
+| `msdos/sswitch.c`, `msdos/brk16.asm` | running Perl on a stack segment of its own (SS != DS); M1 experiment, not in the default build |
 | `scripts/*`, `tests/*`, `Makefile` | build, audit and test tooling |
 
 Their license is still to be chosen (docs/M0-AUDIT.md, section 3).

@@ -32,6 +32,11 @@ jobs:
       - name: Test
         run: make test
 
+      # Perl 3.044's own t/ suite; a script in tests/t-baseline.txt that
+      # stops passing fails the build.
+      - name: Test (t/ suite)
+        run: make test-t
+
       - name: Audit
         run: |
           make audit

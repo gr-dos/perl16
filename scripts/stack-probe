@@ -1,0 +1,109 @@
+#!/usr/bin/env perl
+
+use 5.036;
+use warnings;
+use autodie qw(open close);
+use File::Basename qw(basename dirname);
+use File::Copy qw(copy);
+use File::Path qw(make_path remove_tree);
+use File::Spec;
+use FindBin;
+use lib "$FindBin::Bin/../tests";
+use DosRun qw(write_config run_batch dos_files slurp);
+
+=head1 NAME
+
+stack-probe - how deep Perl recursion goes before a PERL.EXE runs out of stack
+
+=head1 SYNOPSIS
+
+  scripts/stack-probe [--memkb N] PERL.EXE...
+
+=head1 DESCRIPTION
+
+For each PERL.EXE, runs Perl scripts that recurse to a given depth under
+DOSBox-X on an emulated 8086, and finds by bisection the deepest
+recursion each kind of subroutine survives. The kinds are:
+
+  simple   sub d { &d($_[0] + 1) if $_[0] < N; }
+  local    sub f { local($n) = @_; $n >= N ? 0 : 1 + &f($n + 1); }
+           (a local() and the recursive call inside an expression)
+  string   recursion that builds a string with sprintf and a regex at
+           every level
+
+Every run is classified as C<ok> (the script finished), C<reported>
+(exit status 255 with "Stack overflow" in its output: a stack check
+caught it), C<crash> (the session ended without the script finishing)
+or C<timeout>. For each executable and kind it prints the deepest C<ok>
+depth and what happened one step beyond it.
+
+--memkb N limits conventional memory to N KB (DOSBox-X "dos mem limit").
+
+Environment: DOSBOX, WORK (default build/stack-probe), DOSBOX_TIMEOUT
+(seconds per run, default 30).
+
+=cut
+
+my $memkb;
+if (@ARGV && $ARGV[0] eq '--memkb') { shift; $memkb = shift; }
+my @exes = @ARGV or die "usage: $0 [--memkb N] PERL.EXE...\n";
+
+my %KIND = (
+    simple => 'sub d { &d($_[0] + 1) if $_[0] < N; } &d(0);',
+    local  => 'sub f { local($n) = @_; $n >= N ? 0 : 1 + &f($n + 1); } $x = &f(0);',
+    string => 'sub s { local($n, $acc) = @_; return $acc if $n >= N;'
+            . ' $acc = sprintf("%s:%d", $acc, $n); $acc =~ s/(\d+)$/$1/;'
+            . ' &s($n + 1, $acc); } $x = &s(0, "");',
+);
+my %MAX = (simple => 400, local => 400, string => 400);
+my $TIMEOUT = $ENV{DOSBOX_TIMEOUT} // 30;
+
+my $work = File::Spec->rel2abs($ENV{WORK} // 'build/stack-probe');
+remove_tree($work);
+make_path($work);
+write_config($work, $memkb ? (memkb => $memkb) : ());
+
+my $run = 0;
+sub probe ($exe, $kind, $n) {
+    my $code = $KIND{$kind} =~ s/\bN\b/$n/gr;
+    open my $p, '>', "$work/P.PL";
+    print $p "open(STDERR, \">&STDOUT\");\n$code\nprint \"done\\n\";\n";
+    close $p;
+    unlink grep { -e } map { "$work/$_" } qw(P.OUT P.RC);
+    my $n2 = ++$run;
+    my $timedout = run_batch($work, ['@echo off', "PERL P.PL >P.OUT",
+        'if errorlevel 255 goto o', 'echo ok >P.RC', 'goto d',
+        ':o', 'echo 255 >P.RC', ':d'], $TIMEOUT, "$work/R$n2.LOG");
+    my %f = dos_files($work);
+    my $out = $f{'P.OUT'} ? slurp($f{'P.OUT'}) : '';
+    my $rc = $f{'P.RC'} ? slurp($f{'P.RC'}) : '';
+    return 'timeout'  if $timedout;
+    return 'crash'    unless $rc;
+    return 'ok'       if $rc =~ /ok/ && $out =~ /done/;
+    return 'reported' if $rc =~ /255/ && $out =~ /Stack overflow/;
+    return 'other';
+}
+
+printf "%-28s %-7s %6s  %s\n", 'executable', 'kind', 'max ok', 'beyond it';
+for my $exe (@exes) {
+    my $label = basename($exe) eq 'PERL.EXE' ? basename(dirname($exe)) : basename($exe);
+    copy($exe, "$work/PERL.EXE") or die "copy $exe: $!\n";
+    for my $kind (qw(simple local string)) {
+        my ($lo, $hi, $fail) = (0, $MAX{$kind} + 1, undef);
+        my $top = probe($exe, $kind, $MAX{$kind});
+        if ($top eq 'ok') {
+            printf "%-28s %-7s %6s  %s\n", $label, $kind,
+                ">=$MAX{$kind}", '-';
+            next;
+        }
+        $fail = $top;
+        while ($hi - $lo > 1) {
+            my $mid = int(($lo + $hi) / 2);
+            my $r = probe($exe, $kind, $mid);
+            if ($r eq 'ok') { $lo = $mid } else { $hi = $mid; $fail = $r }
+        }
+        printf "%-28s %-7s %6d  %s at %d\n", $label, $kind, $lo,
+            $fail, $hi;
+    }
+}
+remove_tree($work) unless $ENV{KEEP};
