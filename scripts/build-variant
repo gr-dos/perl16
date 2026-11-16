@@ -10,7 +10,7 @@
 # assembled source in build/src (make builds it). Needs WATCOM and wcc,
 # wlink and wasm on PATH (make variants arranges it).
 #
-#   dev      as build/dev/PERL.EXE: default optimisation, stack checks,
+#   dev      the M1 development build: default optimisation, stack checks,
 #            32 KB stack in DGROUP
 #   nochk    -s: no stack checks
 #   os       -os: optimise for size

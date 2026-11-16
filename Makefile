@@ -51,27 +51,47 @@ P16_NAMES   = mktemp
 
 # Development build: large model, 8086 instructions, Open Watcom's headers
 # and runtime. -zc puts string literals in the code segment; without it
-# DGROUP overflows (docs/M0-AUDIT.md, section 6). The 32 KB stack is the
-# historical port's (/stack:32767).
+# DGROUP overflows (docs/M0-AUDIT.md, section 6).
+#
+# The stack (docs/M2-REPORT.md, section 4): -DCRIPPLED_CC, as the
+# historical port was built, makes str_get, str_gnum and str_true
+# functions, which shrinks eval()'s frame from 780 to 186 bytes;
+# msdos/stk16.asm replaces Open Watcom's __STK with a check that keeps
+# STK16_MARGIN bytes in reserve and reports overflow on standard error
+# with exit status 255; and the stack is as large as DGROUP allows while
+# leaving DGROUP_MIN_FREE bytes free for the near heap, which child
+# processes need (scripts/check-dgroup checks the map).
 CC          = wcc
-DEV_CFLAGS  = -q -zq -ml -0 -zc -bt=dos -DMSDOS -I$(SRC) -I$$WATCOM/h
-DEV_LDOPTS  = option quiet, stack=32k
+AS          = wasm
+STACK       ?= 51k
+STK16_MARGIN ?= 2048
+DGROUP_MIN_FREE ?= 2048
+DEV_CFLAGS  = -q -zq -ml -0 -zc -bt=dos -DMSDOS -DCRIPPLED_CC -I$(SRC) \
+              -I$$WATCOM/h
+DEV_AFLAGS  = -q -ml -0 -dSTK16_MARGIN=$(STK16_MARGIN)
+DEV_LDOPTS  = disable 1027 option quiet, stack=$(STACK)
 
-DEV_OBJS    = $(PERL_NAMES:%=$(DEV)/%.obj) $(PORT_NAMES:%=$(DEV)/%.obj) \
-              $(P16_NAMES:%=$(DEV)/%.obj)
+DEV_OBJS    = $(DEV)/stk16.obj $(PERL_NAMES:%=$(DEV)/%.obj) \
+              $(PORT_NAMES:%=$(DEV)/%.obj) $(P16_NAMES:%=$(DEV)/%.obj)
 PATCHES     = $(sort $(wildcard patches/*.patch))
 
 all: $(DEV)/PERL.EXE
 
-$(DEV)/PERL.EXE: $(DEV_OBJS) $(TOOLS_ENV)
+$(DEV)/PERL.EXE: $(DEV_OBJS) $(TOOLS_ENV) scripts/check-dgroup Makefile
 	$(WATCOM_ENV) && wlink $(DEV_LDOPTS), map=$(DEV)/perl.map \
-	  system dos name $@ $(DEV_OBJS:%=file %)
+	  system dos name $@.tmp $(DEV_OBJS:%=file %)
+	perl scripts/check-dgroup $(DEV)/perl.map $(DGROUP_MIN_FREE)
+	mv $@.tmp $@
 
-$(DEV)/%.obj: $(SRC)/%.c $(SRC)/.stamp $(TOOLS_ENV)
+$(DEV)/%.obj: msdos/%.asm $(TOOLS_ENV) Makefile
+	mkdir -p $(DEV)
+	$(WATCOM_ENV) && $(AS) $(DEV_AFLAGS) -fo=$@ $<
+
+$(DEV)/%.obj: $(SRC)/%.c $(SRC)/.stamp $(TOOLS_ENV) Makefile
 	mkdir -p $(DEV)
 	$(WATCOM_ENV) && $(CC) $(DEV_CFLAGS) -fo=$@ $<
 
-$(DEV)/%.obj: msdos/%.c $(TOOLS_ENV)
+$(DEV)/%.obj: msdos/%.c $(TOOLS_ENV) Makefile
 	mkdir -p $(DEV)
 	$(WATCOM_ENV) && $(CC) $(DEV_CFLAGS) -fo=$@ $<
 
@@ -105,8 +125,8 @@ $(TOOLS_ENV): $(LIBC16L)
 	watcom=$$(sh $(LIBC16_DIR)/tools/fetch-watcom $(CURDIR)/build/tools) \
 	  && printf 'WATCOM=%s\nexport WATCOM\n' "$$watcom" > $@
 
-# M1 measurement variants (docs/M1-REPORT.md); dev is build/dev/PERL.EXE
-# built again.
+# M1 measurement variants (docs/M1-REPORT.md); dev is the M1 development
+# build (32 KB stack, no CRIPPLED_CC, Open Watcom's __STK), not build/dev.
 VARIANTS    = dev nochk os ox crip stk46 margin rec ss64
 
 variants: $(SRC)/.stamp $(TOOLS_ENV)
