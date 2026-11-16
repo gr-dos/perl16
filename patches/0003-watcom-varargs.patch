@@ -1,0 +1,44 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Graham Ollis <plicease@cpan.org>
+Date: Sun, 15 Nov 2026 18:10:17 -0700
+Subject: [PATCH 3/3] Prototype the varargs functions for Open Watcom's calling
+ convention
+
+fatal(), warn() and deb() are defined with <varargs.h> (va_alist,
+va_dcl), which Open Watcom expands to a variadic definition, taking every
+argument on the stack. Perl 3 calls them with no declaration in scope,
+and with no prototype Watcom's default register convention passes the
+first arguments in AX, DX, BX and CX. The functions then formatted
+whatever was on the stack: every die and warn message was garbage, and a
+die from some places (an undefined subroutine, for one) crashed DOS.
+Microsoft C passed everything on the stack, so the historical port never
+saw this.
+
+perl.h now declares all three with a variadic prototype under
+__WATCOMC__.
+---
+ perl.h | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/perl.h b/perl.h
+index 1e1a256..0779473 100644
+--- a/perl.h
++++ b/perl.h
+@@ -477,6 +477,17 @@ double str_gnum();
+ #endif /* CRIPPLED_CC */
+ EXT STR *Str;
+ 
++#ifdef __WATCOMC__
++/* fatal(), warn() and deb() are defined with <varargs.h>, which Open
++ * Watcom implements as variadic functions taking their arguments on the
++ * stack.  A call with no prototype in scope passes the first arguments in
++ * registers, so every caller must see these.  (perl16)
++ */
++int fatal(void *, ...);
++int warn(void *, ...);
++int deb(void *, ...);
++#endif
++
+ #define GROWSTR(pp,lp,len) if (*(lp) < (len)) growstr(pp,lp,len)
+ 
+ #ifndef MSDOS

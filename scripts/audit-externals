@@ -1,0 +1,141 @@
+#!/usr/bin/env perl
+
+use 5.036;
+use warnings;
+use autodie qw(open close);
+use File::Copy qw(copy);
+
+=head1 NAME
+
+audit-externals - list what the interpreter's objects need from a C runtime
+
+=head1 SYNOPSIS
+
+  scripts/audit-externals OUTDIR LIBC16L.LIB OBJECT...
+
+Needs C<wlink> and C<wlib> on C<PATH> (C<make audit> arranges it).
+
+=head1 DESCRIPTION
+
+Links OBJECTs with no libraries at all (C<option nodefaultlibs, undefsok>),
+so that every symbol they need from outside themselves is reported, and
+classifies each one:
+
+=over
+
+=item helper
+
+a code-generation helper the compiler calls (long multiply and divide,
+stack check, float-to-int truncation)
+
+=item x87
+
+an 8087 fixup: the objects were compiled with inline x87 instructions
+(C<-fpi>), which need an FPU or an emulator
+
+=item header
+
+a symbol that exists only because the objects were compiled with Open
+Watcom's headers (the C<ctype> table, C<FILE> array, C<errno> function);
+with libc16's headers it is replaced by something else
+
+=item function, data
+
+a C library function or variable
+
+=back
+
+and says whether the given libc16 large-model library defines it, under
+libc16's C<__cdecl> name (C<_name>; the objects use Open Watcom's register
+convention, C<name_>, so they cannot be linked with libc16 as they are).
+
+Writes OUTDIR/report.txt, OUTDIR/externals.txt (one symbol per line),
+OUTDIR/nolib.map and OUTDIR/libc16l.lst, and prints the summary.
+
+=cut
+
+my ($out, $lib, @objs) = @ARGV;
+die "usage: $0 OUTDIR LIBC16L.LIB OBJECT...\n" unless @objs;
+
+# Undefined symbols, and which objects refer to them.
+my $lnk = "$out/nolib.lnk";
+open my $l, '>', $lnk;
+say $l "option quiet, nodefaultlibs, undefsok, map=$out/nolib.map";
+say $l "format dos name $out/nolib.exe";
+say $l "file $_" for @objs;
+close $l;
+my %refs;
+for (qx(wlink \@$lnk 2>&1)) {
+    next unless /file ([^\s(]+)\S*: undefined symbol (\S+)/;
+    my ($obj, $sym) = ($1, $2);
+    $obj =~ s{.*/}{};
+    $obj =~ s{\.obj$}{};
+    $refs{$sym}{$obj} = 1;
+}
+unlink "$out/nolib.exe";
+die "audit-externals: wlink reported no undefined symbols\n" unless %refs;
+
+# libc16's public symbols. wlib lists a copy, so the library itself is
+# never opened for writing.
+copy($lib, "$out/libc16l.lib") or die "copy $lib: $!\n";
+system('wlib', '-q', "-l=$out/libc16l.lst", "$out/libc16l.lib") == 0
+    or die "audit-externals: wlib failed\n";
+unlink "$out/libc16l.lib";
+my %libc16;
+open my $lst, '<', "$out/libc16l.lst";
+while (<$lst>) {
+    $libc16{$1} = 1 if /^(\S+?)\.\.\./;
+}
+close $lst;
+die "audit-externals: no symbols in $lib\n" unless %libc16;
+
+my %HELPER = map { $_ => 1 } qw(__I4D __I4M __U4D __U4M __CHP __STK
+    __PIA __PIS __PTC __PTS __FDA __FDS __FDM __FDD __FDC __FDN);
+my %HEADER = map { $_ => 1 } qw(__IsTable ___iob __get_errno_ptr_);
+
+sub classify ($sym) {
+    return ('x87',    undef)  if $sym =~ /^F[A-Z]{2}RQQ$/;
+    return ('helper', $sym)   if $HELPER{$sym};
+    return ('header', undef)  if $HEADER{$sym};
+    return ('function', "_$1") if $sym =~ /^(_?[a-z]\w*?)_$/;
+    return ('data',   $sym)   if $sym =~ /^_[a-z]/;
+    return ('other',  $sym);
+}
+
+my (%count, @rows);
+for my $sym (sort { lc $a cmp lc $b } keys %refs) {
+    my ($kind, $name) = classify($sym);
+    my $have = !defined $name    ? 'n/a'
+             : $libc16{$name}    ? 'yes'
+             :                     'no';
+    my $c = $sym =~ s/_\z//r;
+    $c = $sym if $kind ne 'function';
+    push @rows, [$c, $kind, $have, join ' ', sort keys %{ $refs{$sym} }];
+    $count{$kind}{$have}++;
+}
+
+open my $ext, '>', "$out/externals.txt";
+say $ext $_ for sort keys %refs;
+close $ext;
+
+my $total = keys %refs;
+my @summary = ("$total external symbols in " . @objs . " objects");
+for my $kind (qw(function data helper header x87 other)) {
+    next unless $count{$kind};
+    my $n = 0;
+    $n += $_ for values %{ $count{$kind} };
+    my $c = $count{$kind};
+    my $detail = $kind =~ /^(header|x87)$/ ? ''
+        : sprintf ' (libc16: %d yes, %d no)', $c->{yes} // 0, $c->{no} // 0;
+    push @summary, sprintf '  %-8s %3d%s', $kind, $n, $detail;
+}
+
+open my $r, '>', "$out/report.txt";
+say $r $_ for @summary;
+say $r '';
+printf $r "%-16s %-8s %-6s %s\n", 'symbol', 'kind', 'libc16', 'used by';
+printf $r "%-16s %-8s %-6s %s\n", @$_ for @rows;
+close $r;
+
+say for @summary;
+say "report: $out/report.txt";

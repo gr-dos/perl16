@@ -1,0 +1,254 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Graham Ollis <plicease@cpan.org>
+Date: Sun, 15 Nov 2026 17:46:00 -0700
+Subject: [PATCH 2/3] Compile under Open Watcom C (large model, Watcom headers)
+
+The smallest changes that let every module compile with wcc -ml against
+Open Watcom's own headers. No behaviour change is intended except where
+noted.
+
+- perl.h, util.h: hide K&R declarations of time() and setenv() that
+  conflict with the ANSI prototypes in Watcom's headers.
+- perl.h: declare statstab and statname EXT like their neighbours; without
+  it every module defined them, which only a linker with common symbols
+  accepts quietly.
+- msdos/config.h: no STDSTDIO; Watcom's FILE has no _ptr/_cnt/_base, so
+  -T and -B on a filehandle (not a file name) become a fatal error.
+- msdos/config.h: STRERROR, from config.h.SH (msdos/config.h predates it);
+  Watcom has strerror() but no sys_errlist.
+- perly.c: include patchlevel.h, not the 8.3 name patchlev.h.
+- toke.c: test YYDEBUG as perl.y does; bison always defines YYDEBUG
+  (as 0), which turned on code that needs DEBUGGING.
+- cons.c: make_usub() returns a null SUBR* rather than no value.
+- eval.c: DOS mkdir() takes no mode; correct the dospatch44 alarm stub's
+  message, which said "fork".
+- msdos/msdos.c: sleep() returns unsigned, as Watcom declares it; drop a
+  getenv() declaration that conflicts with <stdlib.h>.
+- msdos/popen.c: atexit() rather than the MSC onexit().
+- msdos/directory.c: rejoin an rcsid string split across two lines.
+---
+ cons.c            | 2 +-
+ eval.c            | 6 +++++-
+ msdos/config.h    | 9 ++++++++-
+ msdos/directory.c | 3 +--
+ msdos/msdos.c     | 5 ++---
+ msdos/popen.c     | 7 +++----
+ perl.h            | 6 ++++--
+ perly.c           | 4 ----
+ toke.c            | 2 +-
+ util.h            | 2 ++
+ 10 files changed, 27 insertions(+), 19 deletions(-)
+
+diff --git a/cons.c b/cons.c
+index e71f1f7..54784d3 100644
+--- a/cons.c
++++ b/cons.c
+@@ -137,7 +137,7 @@ char *filename;
+     STAB *stab = stabent(name,allstabs);
+ 
+     if (!stab)				/* unused function */
+-	return;
++	return Null(SUBR*);
+     Newz(101,sub,1,SUBR);
+     if (stab_sub(stab)) {
+ 	if (dowarn)
+diff --git a/eval.c b/eval.c
+index 11b5ec5..10e811b 100644
+--- a/eval.c
++++ b/eval.c
+@@ -1379,7 +1379,7 @@ register int sp;
+ 	value = (double)anum;
+ 	goto donumset;
+ #else
+-	fatal("Unsupported function fork");
++	fatal("Unsupported function alarm");
+ 	break;
+ #endif
+     case O_SLEEP:
+@@ -1743,7 +1743,11 @@ register int sp;
+ 	taintproper("Insecure dependency in mkdir");
+ #endif
+ #ifdef MKDIR
++#ifdef MSDOS
++	value = (double)(mkdir(tmps) >= 0);
++#else
+ 	value = (double)(mkdir(tmps,anum) >= 0);
++#endif
+ 	goto donumset;
+ #else
+ 	(void)strcpy(buf,"mkdir ");
+diff --git a/msdos/config.h b/msdos/config.h
+index 61f6884..9d218df 100644
+--- a/msdos/config.h
++++ b/msdos/config.h
+@@ -318,7 +318,7 @@
+  *	This symbol is defined if this system has a FILE structure declaring
+  *	_ptr and _cnt in stdio.h.
+  */
+-#define	STDSTDIO 	/**/
++/*#define	STDSTDIO 	*/ /* perl16: Open Watcom's FILE has no _ptr/_cnt/_base */
+ 
+ /* STRUCTCOPY:
+  *	This symbol, if defined, indicates that this C compiler knows how
+@@ -327,6 +327,13 @@
+  */
+ #define	STRUCTCOPY	/**/
+ 
++/* STRERROR:
++ *	This symbol, if defined, indicates that the strerror() routine is
++ *	available to translate error numbers to strings.
++ *	(perl16: Open Watcom has strerror() but no sys_errlist.)
++ */
++#define	STRERROR		/**/
++
+ /* SYMLINK:
+  *	This symbol, if defined, indicates that the symlink routine is available
+  *	to create symbolic links.
+diff --git a/msdos/directory.c b/msdos/directory.c
+index b435453..6cfcc6c 100644
+--- a/msdos/directory.c
++++ b/msdos/directory.c
+@@ -41,8 +41,7 @@
+ #define PATHLEN 65
+ 
+ #ifndef lint
+-static char     rcsid[] = "$Header: director.c;v 1.3 90/03/16 22:39:40 dds Exp
+- $";
++static char     rcsid[] = "$Header: director.c;v 1.3 90/03/16 22:39:40 dds Exp $";
+ #endif
+ 
+ DIR *
+diff --git a/msdos/msdos.c b/msdos/msdos.c
+index c2f3e5a..44db8a6 100644
+--- a/msdos/msdos.c
++++ b/msdos/msdos.c
+@@ -125,7 +125,7 @@ ioctl(int handle, unsigned int function, char *data)
+ /*
+  * Sleep function.
+  */
+-void
++unsigned
+ sleep(unsigned len)
+ {
+ 	time_t end;
+@@ -133,6 +133,7 @@ sleep(unsigned len)
+ 	end = time((time_t *)0) + len;
+ 	while (time((time_t *)0) < end)
+ 		;
++	return 0;
+ }
+ 
+ /*
+@@ -210,8 +211,6 @@ int *arglast;
+     return status;
+ }
+ 
+-char *getenv(char *name);
+-
+ int
+ do_spawn(cmd)
+ char *cmd;
+diff --git a/msdos/popen.c b/msdos/popen.c
+index 4cc58d1..1834e85 100644
+--- a/msdos/popen.c
++++ b/msdos/popen.c
+@@ -46,7 +46,7 @@ static struct todo {
+ 
+ 
+ /* Clean up function */
+-static int close_pipes(void);
++static void close_pipes(void);
+ 
+ /*
+  * Add a file f running the command command on file name to the list
+@@ -78,7 +78,7 @@ mypopen(const char *command, const char *t)
+ 	static init = 0;
+ 
+ 	if (!init)
+-		if (onexit(close_pipes) == NULL)
++		if (atexit(close_pipes) != 0)
+ 			return NULL;
+ 		else
+ 			init++;
+@@ -167,12 +167,11 @@ mypclose(FILE *f)
+ /*
+  * Clean up at the end.  Called by the onexit handler.
+  */
+-static int
++static void
+ close_pipes(void)
+ {
+ 	struct todo    *p;
+ 
+ 	for (p = todolist; p; p = p->next)
+ 		(void)mypclose(p->f);
+-	return 0;
+ }
+diff --git a/perl.h b/perl.h
+index ca773cb..1e1a256 100644
+--- a/perl.h
++++ b/perl.h
+@@ -746,8 +746,8 @@ STIO *stio_new();
+ 
+ EXT struct stat statbuf;
+ EXT struct stat statcache;
+-STAB *statstab INIT(Nullstab);
+-STR *statname;
++EXT STAB *statstab INIT(Nullstab);
++EXT STR *statname;
+ #ifndef MSDOS
+ EXT struct tms timesbuf;
+ #endif
+@@ -815,7 +815,9 @@ EXT char *dc;
+ EXT short *ds;
+ 
+ double atof();
++#ifndef __WATCOMC__
+ long time();
++#endif
+ EXT long basetime INIT(0);
+ struct tm *gmtime(), *localtime();
+ char *mktemp();
+diff --git a/perly.c b/perly.c
+index 16ebe88..296b1f2 100644
+--- a/perly.c
++++ b/perly.c
+@@ -65,11 +65,7 @@ char rcsid[] = "$Header: perly.c,v 3.0.1.10 91/01/11 18:22:48 lwall Locked $\nPa
+ #include "EXTERN.h"
+ #include "perl.h"
+ #include "perly.h"
+-#ifdef MSDOS
+-#include "patchlev.h"
+-#else
+ #include "patchlevel.h"
+-#endif
+ 
+ #ifdef IAMSUID
+ #ifndef DOSUID
+diff --git a/toke.c b/toke.c
+index e3f3c73..d193933 100644
+--- a/toke.c
++++ b/toke.c
+@@ -213,7 +213,7 @@ yylex()
+     oldbufptr = s;
+ 
+   retry:
+-#ifdef YYDEBUG
++#if defined(YYDEBUG) && defined(DEBUGGING)
+     if (debug & 1)
+ 	if (index(s,'\n'))
+ 	    fprintf(stderr,"Tokener at %s",s);
+diff --git a/util.h b/util.h
+index 7a14bcb..e050289 100644
+--- a/util.h
++++ b/util.h
+@@ -28,7 +28,9 @@ char	*fbminstr();
+ char	*screaminstr();
+ void	fbmcompile();
+ char	*savestr();
++#ifndef __WATCOMC__
+ void	setenv();
++#endif
+ int	envix();
+ void	growstr();
+ char	*ninstr();

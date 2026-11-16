@@ -1,0 +1,11 @@
+
+This is perl, version 3.0
+
+$Header: perly.c,v 3.0.1.10 91/01/11 18:22:48 lwall Locked $
+Patch level: 44
+
+Copyright (c) 1989, 1990, Larry Wall
+MS-DOS port Copyright (c) 1989, 1990, Diomidis Spinellis
+
+Perl may be copied only under the terms of the GNU General Public License,
+a copy of which can be found with the Perl 3.0 distribution kit.

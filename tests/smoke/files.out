@@ -1,0 +1,7 @@
+size 6
+lines 2 b
+raw 3
+now 3 lines
+exists dir
+-U
+gone

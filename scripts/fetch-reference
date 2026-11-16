@@ -1,0 +1,35 @@
+#!/bin/sh
+#
+# Fetch the historical MS-DOS port material from Diomidis Spinellis's
+# Perl 3 for MS-DOS page into DIR, and check each file against
+# upstream/reference.sha256:
+#
+#   dospatch44         maintenance patch, 1999-01-10 (patches/0001 is
+#                      derived from it)
+#   perl3.0-44.tar.gz  his perl 3.0 patch level 44 distribution
+#   README.msdos       the port's README (the same as msdos/README.msdos
+#                      in tag perl-3.044)
+#
+# None of these is needed to build perl16; they are the evidence behind
+# docs/M0-AUDIT.md. Reuses files already present with the right hash.
+#
+# usage: scripts/fetch-reference [DIR]     (default: build/reference)
+#
+# DOSPERL_URL, if set, replaces the base URL (a mirror).
+
+set -eu
+
+base=${DOSPERL_URL:-https://www2.dmst.aueb.gr/dds/sw/ports/dosperl}
+dir=${1:-build/reference}
+sums=$(cd "$(dirname "$0")/.." && pwd)/upstream/reference.sha256
+
+mkdir -p "$dir"
+while read -r sum name; do
+  f="$dir/$name"
+  if ! { [ -f "$f" ] && echo "$sum  $f" | sha256sum -c --status; }; then
+    rm -f "$f" "$f.tmp"
+    curl -fsSL -o "$f.tmp" "$base/$name"
+    echo "$sum  $f.tmp" | sha256sum -c --quiet
+    mv "$f.tmp" "$f"
+  fi
+done < "$sums"

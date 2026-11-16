@@ -1,0 +1,38 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      # make fetches tag perl-3.044 (scripts/fetch-upstream), the pinned
+      # libc16 release (scripts/fetch-libc16) and the Open Watcom snapshot
+      # it names; the snapshot is cached per pin.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/tools
+          key: libc16-tools-ubuntu-24.04-${{ hashFiles('scripts/fetch-libc16') }}
+
+      - name: Install DOSBox-X, bison and patch
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dosbox-x bison patch
+
+      # The development build links Open Watcom's runtime and is never
+      # published (docs/DESIGN.md, section 8), so it is not uploaded.
+      - name: Build
+        run: make
+
+      - name: Test
+        run: make test
+
+      - name: Audit
+        run: |
+          make audit
+          cat build/audit/report.txt
