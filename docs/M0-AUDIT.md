@@ -272,6 +272,10 @@ name. M3 has to rebuild against libc16's headers.
 
 ## 9. Defects found
 
+(M2 fixed defects 2–4 and the `sleep` warning in 5, and decided every item
+in 7 except the `sort { … } LIST` hang, which is still open:
+docs/M2-REPORT.md.)
+
 Each defect is in upstream code unless noted, and applies to any 16-bit
 `int` build, so the historical MSC port probably had defects 2–5 as well.
 
