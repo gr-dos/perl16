@@ -197,6 +197,7 @@ stack. DGROUP (one 64 KB segment, addressed near) holds:
 - The overflow is **not reported**: the process dies and takes the batch
   file with it, even though Watcom's stack checks (`__STK`) are compiled
   in. This needs explaining in M1.
+  (M1 measured and explained this: docs/M1-REPORT.md, section 5.)
 - **Options for M1/M3:**
   - Keep the stack in DGROUP and maximise it (about 46 KB).
   - Put it in its own segment (SS ≠ DS). That needs startup code perl16

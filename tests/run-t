@@ -1,0 +1,161 @@
+#!/usr/bin/env perl
+
+use 5.036;
+use warnings;
+use autodie qw(open close);
+use File::Basename qw(basename);
+use File::Copy qw(copy);
+use File::Path qw(make_path remove_tree);
+use File::Spec;
+use FindBin;
+use lib $FindBin::Bin;
+use DosRun qw(write_config run_batch dos_files slurp);
+
+=head1 NAME
+
+run-t - run Perl 3.044's own regression tests (t/) with a DOS PERL.EXE
+
+=head1 SYNOPSIS
+
+  tests/run-t PERL.EXE UPSTREAM-DIR [BASELINE]
+
+=head1 DESCRIPTION
+
+Runs every script in UPSTREAM-DIR/t (not F<TEST> or F<README>) under
+DOSBox-X on an emulated 8086, one session per script, as
+F<C:\T\Tnn.PL> (the upstream names are not DOS names), with the switches
+from its C<#!./perl> line. C:\ holds F<PERL.EXE>, the upstream F<lib/>
+as F<C:\LIB> (files with 8.3 names only), and F<Makefile.SH> as
+F<C:\MAKEFILE>, which F<io.tell> reads as F<../Makefile>.
+
+Each script prints C<1..N> and then C<ok K> or C<not ok K>. A script
+passes if it printed the plan and C<ok> for every test in it. The result
+of every script goes to standard output and to F<WORK/results.txt>.
+
+With BASELINE (F<tests/t-baseline.txt>: lines C<NAME pass> or
+C<NAME fail REASON>), exits 1 if a script listed as C<pass> no longer
+passes, and reports scripts that pass but are listed as C<fail>. With
+C<UPDATE=1> it rewrites BASELINE from this run instead.
+
+Environment: DOSBOX, DOSBOX_TIMEOUT seconds per script (default 120),
+WORK (default build/run-t), KEEP=1 to keep the work directory.
+
+=cut
+
+my ($exe, $up, $baseline) = @ARGV;
+die "usage: $0 PERL.EXE UPSTREAM-DIR [BASELINE]\n" unless $up;
+die "$exe not found\n" unless -f $exe;
+my $timeout = $ENV{DOSBOX_TIMEOUT} // 120;
+
+my $work = File::Spec->rel2abs($ENV{WORK} // 'build/run-t');
+remove_tree($work);
+make_path("$work/T", "$work/LIB");
+copy($exe, "$work/PERL.EXE") or die "copy $exe: $!\n";
+copy("$up/Makefile.SH", "$work/MAKEFILE") or die "copy Makefile.SH: $!\n";
+for my $f (glob "$up/lib/*") {
+    my $b = basename($f);
+    next unless $b =~ /^[^.]{1,8}(\.[^.]{1,3})?$/;
+    copy($f, "$work/LIB/" . uc $b) or die "copy $f: $!\n";
+}
+
+# TEST and re_tests are data the scripts read (cmd.mod, op.regexp).
+for my $f (qw(TEST re_tests)) {
+    copy("$up/t/$f", "$work/T/" . uc $f) or die "copy $f: $!\n";
+}
+my @tests = grep { !/^(TEST|README|re_tests)$/ } map { basename($_) } sort glob "$up/t/*";
+my $i = 0;
+my @cases;
+for my $t (@tests) {
+    my $alias = sprintf 'T%02d', ++$i;
+    my $text = slurp("$up/t/$t");
+    # Temporary files named like Cmd.while.tmp are not DOS names; give
+    # each its own 8.3 name.
+    my %tmp;
+    my $n = 0;
+    $text =~ s{\b([A-Z][a-z]+\.[a-z]+\.[a-z]+[0-9]*)\b}
+              { $tmp{$1} //= sprintf("%sX%d.TMP", $alias, ++$n) }ge;
+    # A script that opens itself by name (op.read) gets its DOS name.
+    $text =~ s{(['"])\Q$t\E\1}{$1$alias.PL$1}g and $tmp{$t} = "$alias.PL";
+    my ($switch) = $text =~ /\A#!\S*perl(.*)\n/;
+    $switch //= '';
+    $switch =~ s/^\s+|\s+$//g;
+    open my $o, ">:raw", "$work/T/$alias.PL";
+    print $o $text;
+    close $o;
+    push @cases, { name => $t, alias => $alias, switch => $switch,
+                    renamed => join(" ", map { "$_=$tmp{$_}" } sort keys %tmp) };
+}
+
+write_config($work);
+for my $c (@cases) {
+    my $a = $c->{alias};
+    my $sw = length $c->{switch} ? " $c->{switch}" : '';
+    my @bat = ('@echo off', 'cd \T', "\\PERL.EXE$sw $a.PL >$a.OUT",
+               "echo done >$a.END");
+    $c->{timedout} = run_batch($work, \@bat, $timeout, "$work/$a.LOG");
+}
+
+my %file = dos_files("$work/T");
+my (%result, @lines);
+for my $c (@cases) {
+    my $a = $c->{alias};
+    my $out = defined $file{"$a.OUT"} ? slurp($file{"$a.OUT"}) : '';
+    my ($plan) = $out =~ /^1\.\.(\d+)/m;
+    my %ok;
+    $ok{$1} = 1 while $out =~ /^ok (\d+)/mg;
+    my @not = $out =~ /^not ok (\d+)/mg;
+    my ($status, $why);
+    if (!defined $file{"$a.END"}) {
+        ($status, $why) = ('fail', $c->{timedout} ? "timed out" : 'crashed');
+    } elsif (!defined $plan) {
+        ($status, $why) = ('fail', 'no plan');
+    } else {
+        my @missing = grep { !$ok{$_} } 1 .. $plan;
+        if (!@missing) {
+            ($status, $why) = ('pass', "$plan/$plan");
+        } else {
+            my $n = $plan - @missing;
+            my $list = @missing > 8 ? "@missing[0..7] ..." : "@missing";
+            ($status, $why) = ('fail', "$n/$plan, not ok: $list");
+        }
+    }
+    $result{$c->{name}} = [$status, $why];
+    $why .= " [renamed $c->{renamed}]" if $c->{renamed};
+    push @lines, sprintf "%-16s %-4s %-5s %s", $c->{name}, $a, $status, $why;
+}
+
+open my $r, '>', "$work/results.txt";
+say $r $_ for @lines;
+close $r;
+say for @lines;
+my $npass = grep { $_->[0] eq 'pass' } values %result;
+say "run-t: $npass of " . @cases . " scripts pass";
+
+my $bad = 0;
+if ($baseline && $ENV{UPDATE}) {
+    open my $b, '>', $baseline;
+    say $b "# Perl 3.044 t/ under the development build (tests/run-t)";
+    say $b "# NAME pass | NAME fail REASON";
+    for my $c (@cases) {
+        my ($s, $why) = @{ $result{$c->{name}} };
+        say $b $s eq 'pass' ? "$c->{name} pass" : "$c->{name} fail $why";
+    }
+    close $b;
+    say "run-t: wrote $baseline";
+} elsif ($baseline) {
+    open my $b, '<', $baseline;
+    while (<$b>) {
+        next if /^#/ || !/\S/;
+        my ($name, $want) = split;
+        my $got = $result{$name} or do { say "run-t: $name: in the baseline, not in t/"; $bad++; next };
+        if ($want eq 'pass' && $got->[0] ne 'pass') {
+            say "run-t: REGRESSION: $name ($got->[1])";
+            $bad++;
+        } elsif ($want ne 'pass' && $got->[0] eq 'pass') {
+            say "run-t: $name now passes; update the baseline (UPDATE=1)";
+        }
+    }
+    close $b;
+}
+remove_tree($work) unless $bad || $ENV{KEEP};
+exit($bad ? 1 : 0);

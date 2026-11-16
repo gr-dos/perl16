@@ -1,0 +1,80 @@
+#!/bin/sh
+#
+# Build one experimental variant of the development PERL.EXE, for the M1
+# measurements (docs/M1-REPORT.md). Like build/dev/PERL.EXE it is linked
+# with Open Watcom's runtime and must never be published.
+#
+# usage: scripts/build-variant NAME
+#
+# Writes build/var/NAME/PERL.EXE and build/var/NAME/perl.map, from the
+# assembled source in build/src (make builds it). Needs WATCOM and wcc,
+# wlink and wasm on PATH (make variants arranges it).
+#
+#   dev      as build/dev/PERL.EXE: default optimisation, stack checks,
+#            32 KB stack in DGROUP
+#   nochk    -s: no stack checks
+#   os       -os: optimise for size
+#   ox       -ox: optimise for speed
+#   crip     -DCRIPPLED_CC, as the historical port was built: str_get,
+#            str_gnum and str_true are functions, not macros
+#   stk46    a 46 KB stack, the most DGROUP holds (child processes fail:
+#            docs/M1-REPORT.md, section 5.4)
+#   margin   msdos/stk16.asm's __STK, with a 2 KB guard margin
+#   rec      crip, margin and a 45 KB stack (the most that leaves child
+#            processes working) together: the combination M1
+#            recommends trying
+#   ss64     a 64 KB stack segment of its own (SS != DS): -zu,
+#            msdos/sswitch.c (which also runs child processes on the
+#            DGROUP stack) and msdos/stk16.asm
+
+set -eu
+
+name=$1
+src=build/src
+out=build/var/$name
+base="-q -zq -ml -0 -zc -bt=dos -DMSDOS -I$src -I$WATCOM/h"
+extra=
+stack=32k
+objs=
+main_def=
+renames=
+
+case $name in
+dev)    ;;
+nochk)  extra=-s ;;
+os)     extra=-os ;;
+ox)     extra=-ox ;;
+crip)   extra=-DCRIPPLED_CC ;;
+stk46)  stack=46k ;;
+margin) objs=stk16 ;;
+rec)    extra=-DCRIPPLED_CC; stack=45k; objs=stk16 ;;
+ss64)   extra=-zu; objs="stk16 brk16 sswitch"; main_def=-Dmain=perl_main
+        renames="-Dspawnvp=ss_spawnvp -Dspawnv=ss_spawnv -Dspawnl=ss_spawnl -Dexecvp=ss_execvp -Dexecv=ss_execv -Dexecl=ss_execl -Dsystem=ss_system" ;;
+*)      echo "build-variant: unknown variant $name" >&2; exit 2 ;;
+esac
+
+names="array cmd cons consarg doarg doio dolist dump eval form hash perl
+       perly regcomp regexec stab str toke util msdos popen directory"
+
+rm -rf "$out"
+mkdir -p "$out"
+files=
+for n in $objs; do
+  case $n in
+  stk16) wasm -q -ml -0 -dSTK16_MARGIN=2048 -fo="$out/stk16.obj" msdos/stk16.asm ;;
+  brk16) wasm -q -ml -0 -fo="$out/brk16.obj" msdos/brk16.asm ;;
+  *)     wcc $base $extra -fo="$out/$n.obj" "msdos/$n.c" ;;
+  esac
+  files="$files file $out/$n.obj"
+done
+for n in $names; do
+  def=
+  [ "$n" = perly ] && def=$main_def
+  wcc $base $extra $renames $def -fo="$out/$n.obj" "$src/$n.c" 2>/dev/null
+  files="$files file $out/$n.obj"
+done
+wcc $base $extra -fo="$out/mktemp.obj" msdos/mktemp.c
+files="$files file $out/mktemp.obj"
+wlink option quiet, stack=$stack, map="$out/perl.map" \
+  system dos name "$out/PERL.EXE" $files 2>&1 | grep -v 'W1027' || true
+[ -f "$out/PERL.EXE" ]

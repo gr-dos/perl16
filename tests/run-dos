@@ -7,6 +7,9 @@ use File::Basename qw(basename);
 use File::Copy qw(copy);
 use File::Path qw(make_path remove_tree);
 use File::Spec;
+use FindBin;
+use lib $FindBin::Bin;
+use DosRun qw(write_config run_batch dos_files slurp);
 
 =head1 NAME
 
@@ -40,22 +43,20 @@ its exit-status check are collected afterwards. Exits 0 if every case
 not marked todo passes.
 
 Environment: DOSBOX (default dosbox-x), DOSBOX_TIMEOUT seconds per case
-(default 60), KEEP=1 to keep the work directory.
+(default 60), WORK (default build/run-dos) the work directory, KEEP=1 to
+keep it.
 
 =cut
 
 my ($exe, @dirs) = @ARGV;
 die "usage: $0 PERL.EXE DIR...\n" unless @dirs;
 die "$exe not found\n" unless -f $exe;
-my $dosbox = $ENV{DOSBOX} // 'dosbox-x';
 my $timeout = $ENV{DOSBOX_TIMEOUT} // 60;
 
-my $work = File::Spec->rel2abs('build/run-dos');
+my $work = File::Spec->rel2abs($ENV{WORK} // "build/run-dos");
 remove_tree($work);
 make_path($work);
 copy($exe, "$work/PERL.EXE") or die "copy $exe: $!\n";
-
-sub slurp ($f) { open my $h, '<:raw', $f; local $/; my $s = <$h>; close $h; $s }
 
 my (@cases, %seen);
 for my $dir (@dirs) {
@@ -93,22 +94,7 @@ for my $dir (@dirs) {
 # Each case runs in its own DOSBox-X session, so one that hangs is
 # killed after DOSBOX_TIMEOUT seconds without stopping the others. Its
 # exit status N passes when errorlevel >= N and not >= N + 1.
-open my $cnf, '>', "$work/DOSBOX.CNF";
-print $cnf <<~"END";
-  [sdl]
-  output=surface
-  [dosbox]
-  machine=cga
-  [cpu]
-  core=normal
-  cputype=8086
-  [autoexec]
-  mount c "$work"
-  c:
-  call RUN.BAT
-  exit
-  END
-close $cnf;
+write_config($work);
 
 for my $c (@cases) {
     my ($n, $st) = @$c{qw(name status)};
@@ -116,19 +102,9 @@ for my $c (@cases) {
     push @bat, sprintf 'if errorlevel %d goto f', $st + 1 if $st < 255;
     push @bat, "if not errorlevel $st goto f";
     push @bat, "echo ok >$n.RC", 'goto d', ':f', "echo bad >$n.RC", ':d';
-    open my $b, '>:raw', "$work/RUN.BAT";
-    print $b map { "$_\r\n" } @bat;
-    close $b;
-
-    local $ENV{SDL_VIDEODRIVER} = 'dummy';
-    local $ENV{SDL_AUDIODRIVER} = 'dummy';
-    my $rc = system('sh', '-c', 'exec "$@" >"$0" 2>&1', "$work/$n.LOG",
-        'timeout', '-s', 'KILL', $timeout,
-        $dosbox, '-nogui', '-nomenu', '-conf', "$work/DOSBOX.CNF");
-    $c->{timedout} = 1 if $rc >> 8 == 137;
+    $c->{timedout} = run_batch($work, \@bat, $timeout, "$work/$n.LOG");
 }
-# DOSBox-X may give a file it made any case.
-my %dosfile = map { uc(basename($_)) => $_ } glob "$work/*";
+my %dosfile = dos_files($work);
 
 my ($pass, $fail, $todo) = (0, 0, 0);
 for my $c (@cases) {

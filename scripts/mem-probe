@@ -1,0 +1,110 @@
+#!/usr/bin/env perl
+
+use 5.036;
+use warnings;
+use autodie qw(open close);
+use File::Basename qw(basename);
+use File::Copy qw(copy);
+use File::Path qw(make_path remove_tree);
+use File::Spec;
+use FindBin;
+use lib "$FindBin::Bin/../tests";
+use DosRun qw(write_config run_batch dos_files slurp);
+
+=head1 NAME
+
+mem-probe - the least conventional memory a PERL.EXE runs a workload in
+
+=head1 SYNOPSIS
+
+  scripts/mem-probe FREEMEM.EXE UPSTREAM-DIR PERL.EXE...
+
+=head1 DESCRIPTION
+
+For each PERL.EXE and workload, finds by bisection (in 4 KB steps) the
+smallest DOSBox-X "dos mem limit" (conventional memory, KB) at which the
+workload prints its expected last line, on an emulated 8086, and reports
+it with the memory DOS has free for a program at that limit (from
+FREEMEM.EXE, built from tests/tools/freemem.c by make variants), so
+the DOS overhead can be subtracted. The workloads are:
+
+  version  perl -v
+  smoke    a short script: scalars, a 300-key hash, a regex, a sub
+  bigint   t/lib.big from UPSTREAM-DIR: lib/bigint.pl, 246 tests
+  strings  a 1000-element array of 100-byte strings (100 KB of text)
+
+Environment: DOSBOX, WORK (default build/mem-probe).
+
+=cut
+
+my ($freemem, $up, @exes) = @ARGV;
+die "usage: $0 FREEMEM.EXE UPSTREAM-DIR PERL.EXE...\n" unless @exes;
+
+my $work = File::Spec->rel2abs($ENV{WORK} // 'build/mem-probe');
+remove_tree($work);
+make_path("$work/T", "$work/LIB");
+copy("$up/lib/bigint.pl", "$work/LIB/BIGINT.PL") or die "bigint.pl: $!\n";
+copy("$up/t/lib.big", "$work/T/BIG.PL") or die "lib.big: $!\n";
+copy($freemem, "$work/FREEMEM.EXE") or die "$freemem: $!\n";
+
+open my $s, '>', "$work/T/SMOKE.PL";
+print $s <<'EOF';
+$x = 2 ** 10; $s = "Hello, World"; $s =~ s/o/0/g;
+for ($i = 0; $i < 300; $i++) { $h{"k$i"} = $i; }
+sub f { local($n) = @_; $n <= 1 ? 1 : $n * &f($n - 1); }
+print "smoke ", &f(10), " $s ", scalar(@k = keys %h), "\n";
+EOF
+close $s;
+open $s, '>', "$work/T/STRINGS.PL";
+print $s <<'EOF';
+for ($i = 0; $i < 1000; $i++) { push(@a, sprintf("%04d", $i) . ("x" x 96)); }
+foreach $s (@a) { $t += length($s); }
+print "strings ", scalar(@a), " $t\n";
+EOF
+close $s;
+
+my %LOAD = (
+    version => ['\PERL.EXE -v', qr/This is perl, version 3\.0/],
+    smoke   => ['\PERL.EXE SMOKE.PL', qr/^smoke 3628800 Hell0, W0rld 300/m],
+    bigint  => ['\PERL.EXE BIG.PL', qr/^ok 246$/m],
+    strings => ['\PERL.EXE STRINGS.PL', qr/^strings 1000 100000/m],
+);
+
+my $n = 0;
+sub try ($load, $kb) {
+    write_config($work, memkb => $kb);
+    my %f = dos_files("$work/T");
+    unlink $f{'OUT.TXT'} if $f{'OUT.TXT'};
+    unlink $f{'MEM.TXT'} if $f{'MEM.TXT'};
+    run_batch($work, ['@echo off', 'cd \T', '\FREEMEM >MEM.TXT',
+        "$LOAD{$load}[0] >OUT.TXT"], 120, "$work/R" . ++$n . '.LOG');
+    %f = dos_files("$work/T");
+    my $out = $f{'OUT.TXT'} ? slurp($f{'OUT.TXT'}) =~ s/\r//gr : '';
+    my $mem = $f{'MEM.TXT'} ? slurp($f{'MEM.TXT'}) : '';
+    my ($free) = $mem =~ /(\d+)/;
+    $free = sprintf("%.1f", $free / 1024) if defined $free;
+    return ($out =~ $LOAD{$load}[1] ? 1 : 0, $free // '?', $out);
+}
+
+printf "%-24s %-8s %10s %10s\n", 'executable', 'workload', 'limit KB', 'free KB';
+for my $exe (@exes) {
+    copy($exe, "$work/PERL.EXE") or die "copy $exe: $!\n";
+    for my $load (qw(version smoke bigint strings)) {
+        my ($ok) = try($load, 640);
+        if (!$ok) {
+            printf "%-24s %-8s %10s\n", basename(dirname_of($exe)), $load, 'fails at 640';
+            next;
+        }
+        my ($lo, $hi) = (64, 640);        # $lo fails (assumed), $hi works
+        while ($hi - $lo > 4) {
+            my $mid = 4 * int(($lo + $hi) / 8);
+            my ($r) = try($load, $mid);
+            if ($r) { $hi = $mid } else { $lo = $mid }
+        }
+        my (undef, $free) = try($load, $hi);
+        printf "%-24s %-8s %10d %10s\n", basename(dirname_of($exe)), $load, $hi, $free;
+    }
+}
+remove_tree($work) unless $ENV{KEEP};
+
+sub dirname_of ($p) { my $d = File::Spec->rel2abs($p); $d =~ s{/[^/]+$}{}; $d }

@@ -1,0 +1,102 @@
+#!/usr/bin/env perl
+
+use 5.036;
+use warnings;
+use autodie qw(open close);
+use File::Basename qw(basename dirname);
+use File::Copy qw(copy);
+use File::Path qw(make_path remove_tree);
+use File::Spec;
+use FindBin;
+use lib "$FindBin::Bin/../tests";
+use DosRun qw(write_config run_batch dos_files slurp);
+
+=head1 NAME
+
+bench - time representative Perl workloads on an emulated 8086
+
+=head1 SYNOPSIS
+
+  scripts/bench TICKS.EXE UPSTREAM-DIR PERL.EXE...
+
+=head1 DESCRIPTION
+
+Runs each workload with each PERL.EXE under DOSBox-X (CGA machine,
+8086, a fixed 315 cycles per millisecond, about an IBM PC's 4.77 MHz
+8088) and prints the emulated time in seconds, from BIOS timer ticks
+read by TICKS.EXE (tests/tools/ticks.c, built by make variants) before
+and after. A tick is 55 ms, and the time includes loading PERL.EXE. The
+workloads are:
+
+  startup  print one line
+  arith    2000 iterations of floating-point arithmetic in a loop
+  string   string building: concatenation, substr, sprintf, length
+  regex    matching and substitution over 100 lines
+  hash     300 hash stores and lookups, and a sorted keys (more than 511 keys
+           meets the hsplit() defect, docs/M0-AUDIT.md)
+  subs     500 subroutine calls with local()
+  bigint   t/lib.big from UPSTREAM-DIR (lib/bigint.pl, 246 tests)
+
+A result is checked against the workload's expected last line; a run
+that fails prints FAIL.
+
+Environment: DOSBOX, WORK (default build/bench), CYCLES (default 315).
+
+=cut
+
+my ($ticks, $up, @exes) = @ARGV;
+die "usage: $0 TICKS.EXE UPSTREAM-DIR PERL.EXE...\n" unless @exes;
+my $cycles = $ENV{CYCLES} // 315;
+
+my $work = File::Spec->rel2abs($ENV{WORK} // 'build/bench');
+remove_tree($work);
+make_path("$work/T", "$work/LIB");
+copy($ticks, "$work/TICKS.EXE") or die "$ticks: $!\n";
+copy("$up/lib/bigint.pl", "$work/LIB/BIGINT.PL") or die "bigint.pl: $!\n";
+copy("$up/t/lib.big", "$work/T/BIGINT.PL") or die "lib.big: $!\n";
+
+my %LOAD = (
+    startup => ['print "hello\n";', qr/^hello$/m],
+    arith   => ['$s = 0; for ($i = 0; $i < 2000; $i++) { $s += $i * 1.5 - $i / 3; } print "arith $s\n";',
+                qr/^arith 2332166/m],
+    string  => ['$s = ""; for ($i = 0; $i < 500; $i++) { $s .= sprintf("%04d,", $i); $t = substr($s, $i * 2, 10); }'
+              . ' print "string ", length($s), " $t\n";', qr/^string 2500 /m],
+    regex   => ['for ($i = 0; $i < 100; $i++) { $l = "line $i: the quick brown fox $i jumps"; $n++ if $l =~ /fox (\d+) j/;'
+              . ' ($m = $l) =~ s/(\w+) (\w+)/$2 $1/g; } print "regex $n $m\n";', qr/^regex 100 /m],
+    hash    => ['for ($i = 0; $i < 300; $i++) { $h{"k$i"} = $i; } for ($i = 0; $i < 300; $i++) { $s += $h{"k$i"}; }'
+              . ' @k = sort keys %h; print "hash $s ", scalar(@k), "\n";', qr/^hash 44850 300$/m],
+    subs    => ['sub f { local($a, $b) = @_; $a + $b; } for ($i = 0; $i < 500; $i++) { $s = &f($s, 1); } print "subs $s\n";',
+                qr/^subs 500$/m],
+    bigint  => [undef, qr/^ok 246$/m],
+);
+my @order = qw(startup arith string regex hash subs bigint);
+for my $l (@order) {
+    next unless defined $LOAD{$l}[0];
+    open my $f, '>', "$work/T/\U$l\E.PL";
+    print $f "$LOAD{$l}[0]\n";
+    close $f;
+}
+write_config($work, cycles => $cycles);
+
+printf "%-10s" . (" %8s" x @order) . "\n", 'seconds', @order;
+my $n = 0;
+for my $exe (@exes) {
+    my $label = basename($exe) eq 'PERL.EXE' ? basename(dirname($exe)) : basename($exe);
+    copy($exe, "$work/PERL.EXE") or die "copy $exe: $!\n";
+    my @row;
+    for my $l (@order) {
+        my %f = dos_files("$work/T");
+        unlink grep { defined } @f{qw(OUT.TXT T0.TXT T1.TXT)};
+        run_batch($work, ['@echo off', 'cd \T', '\TICKS >T0.TXT',
+            "\\PERL.EXE \U$l\E.PL >OUT.TXT", '\TICKS >T1.TXT'], 600,
+            "$work/R" . ++$n . '.LOG');
+        %f = dos_files("$work/T");
+        my $out = $f{'OUT.TXT'} ? slurp($f{'OUT.TXT'}) =~ s/\r//gr : '';
+        my ($t0) = ($f{'T0.TXT'} ? slurp($f{'T0.TXT'}) : '') =~ /(\d+)/;
+        my ($t1) = ($f{'T1.TXT'} ? slurp($f{'T1.TXT'}) : '') =~ /(\d+)/;
+        push @row, ($out =~ $LOAD{$l}[1] && defined $t0 && defined $t1)
+            ? sprintf('%.1f', ($t1 - $t0) / 18.2065) : 'FAIL';
+    }
+    printf "%-10s" . (" %8s" x @row) . "\n", $label, @row;
+}
+remove_tree($work) unless $ENV{KEEP};

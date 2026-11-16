@@ -4,15 +4,23 @@
 #   make             build/dev/PERL.EXE, the development build (below)
 #   make test        smoke tests of build/dev/PERL.EXE under DOSBox-X,
 #                    on an emulated 8086 (tests/run-dos)
+#   make test-t      Perl 3.044's own t/ suite under DOSBox-X, checked
+#                    against tests/t-baseline.txt (tests/run-t)
+#   make variants    the M1 experimental builds in build/var (below),
+#                    and FREEMEM.EXE and TICKS.EXE for the probes
+#                    (scripts/build-variant, tests/tools)
+#   make measure     the M1 stack and memory measurements of the variants
+#                    (scripts/stack-probe, scripts/mem-probe;
+#                    docs/M1-REPORT.md)
 #   make audit       runtime inventory of the interpreter's objects:
 #                    build/audit/report.txt (scripts/audit-externals)
 #   make reference   fetch the historical MS-DOS port material into
 #                    build/reference (not needed to build)
 #   make clean       remove build products; keep downloads and tools
 #
-# build/dev/PERL.EXE is linked with Open Watcom's C runtime. It is a
-# development and test binary only and must never be published
-# (docs/DESIGN.md, section 8).
+# build/dev/PERL.EXE and the build/var variants are linked with Open
+# Watcom's C runtime. They are development and test binaries only and
+# must never be published (docs/DESIGN.md, section 8).
 #
 # The source is tag perl-3.044 (scripts/fetch-upstream) with patches/*
 # applied in order, msdos/ flattened into the top directory as the
@@ -97,8 +105,31 @@ $(TOOLS_ENV): $(LIBC16L)
 	watcom=$$(sh $(LIBC16_DIR)/tools/fetch-watcom $(CURDIR)/build/tools) \
 	  && printf 'WATCOM=%s\nexport WATCOM\n' "$$watcom" > $@
 
+# M1 measurement variants (docs/M1-REPORT.md); dev is build/dev/PERL.EXE
+# built again.
+VARIANTS    = dev nochk os ox crip stk46 margin rec ss64
+
+variants: $(SRC)/.stamp $(TOOLS_ENV)
+	$(WATCOM_ENV) && for v in $(VARIANTS); do \
+	  sh scripts/build-variant $$v || exit 1; done
+	$(WATCOM_ENV) && for t in freemem ticks; do \
+	  wcc -q -zq -ms -0 -bt=dos -I$$WATCOM/h -fo=build/var/$$t.obj \
+	    tests/tools/$$t.c && \
+	  wlink option quiet system dos name build/var/$$t.exe \
+	    file build/var/$$t.obj || exit 1; done
+	mv build/var/freemem.exe build/var/FREEMEM.EXE
+	mv build/var/ticks.exe build/var/TICKS.EXE
+
+measure: variants $(UPSTREAM)/.git-tree
+	perl scripts/stack-probe $(VARIANTS:%=build/var/%/PERL.EXE)
+	perl scripts/mem-probe build/var/FREEMEM.EXE $(UPSTREAM) \
+	  build/var/dev/PERL.EXE build/var/ss64/PERL.EXE
+
 test: $(DEV)/PERL.EXE
 	perl tests/run-dos $(DEV)/PERL.EXE tests/smoke
+
+test-t: $(DEV)/PERL.EXE $(UPSTREAM)/.git-tree
+	perl tests/run-t $(DEV)/PERL.EXE $(UPSTREAM) tests/t-baseline.txt
 
 audit: $(DEV_OBJS) $(LIBC16L) $(TOOLS_ENV)
 	mkdir -p build/audit
@@ -109,9 +140,10 @@ reference:
 	sh scripts/fetch-reference build/reference
 
 clean:
-	rm -rf $(SRC) $(SRC).tmp $(DEV) build/audit build/run-dos
+	rm -rf $(SRC) $(SRC).tmp $(DEV) build/var build/audit build/run-dos \
+	  build/run-t build/stack-probe build/mem-probe
 
 # The assembled sources are made by one rule; make must not delete them.
 .SECONDARY:
 
-.PHONY: all test audit reference clean
+.PHONY: all test test-t variants measure audit reference clean
