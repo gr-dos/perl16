@@ -26,8 +26,10 @@ DosRun - run batch files under DOSBox-X on an emulated 8086
 C<write_config> writes F<DOSBOX.CNF> in WORK: a CGA machine with the
 normal core and C<cputype=8086> (and, with C<memkb =E<gt> N>, conventional
 memory limited to N KB; with C<cycles =E<gt> N>, a fixed N cycles per
-millisecond, so emulated time is repeatable), C: mounted on WORK, and an autoexec that
-calls F<RUN.BAT> and exits. C<run_batch> writes LINES as F<RUN.BAT>
+millisecond, so emulated time is repeatable; with C<mounts =E<gt> [...]>,
+further DOSBox-X C<mount> arguments, such as C<'d "/path"'> or
+C<'e "/path" -ro'>), C: mounted on WORK, and an autoexec that calls
+F<RUN.BAT> and exits. C<run_batch> writes LINES as F<RUN.BAT>
 (CRLF line ends) and runs one DOSBox-X session (C<$ENV{DOSBOX}>, default
 dosbox-x) with no display or sound, killed after SECONDS. It returns true
 if the session was killed. C<dos_files> maps each file in WORK, by its
@@ -47,6 +49,7 @@ sub slurp ($f) {
 sub write_config ($work, %opt) {
     my $memsize = $opt{memkb} ? "dos mem limit=$opt{memkb}\n" : "";
     my $cycles = $opt{cycles} ? "cycles=fixed $opt{cycles}\n" : "";
+    my $mounts = join '', map { "mount $_\n" } @{ $opt{mounts} // [] };
     open my $cnf, '>', "$work/DOSBOX.CNF";
     print $cnf <<~"END";
       [sdl]
@@ -57,7 +60,7 @@ sub write_config ($work, %opt) {
       core=normal
       cputype=8086
       $cycles\[autoexec]
-      mount c "$work"
+      ${mounts}mount c "$work"
       c:
       call RUN.BAT
       exit

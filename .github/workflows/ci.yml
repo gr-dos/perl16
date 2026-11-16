@@ -19,6 +19,9 @@ jobs:
           path: build/tools
           key: libc16-tools-ubuntu-24.04-${{ hashFiles('scripts/fetch-libc16') }}
 
+      # Ubuntu 24.04's bison is 3.8.2, the version the parser is pinned
+      # to; scripts/yacc-perl checks it, and the generated parser against
+      # upstream/parser.sha256.
       - name: Install DOSBox-X, bison and patch
         run: |
           sudo apt-get update
@@ -29,6 +32,8 @@ jobs:
       - name: Build
         run: make
 
+      # Smoke tests, then PERL.EXE installed on other drives and
+      # directories (@INC, -e and TEMP, -P).
       - name: Test
         run: make test
 

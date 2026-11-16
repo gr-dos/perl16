@@ -5,23 +5,45 @@
 # "extern YYSTYPE yylval;"), with bison in yacc mode. Tag perl-3.044 ships
 # neither file.
 #
-# Fails unless the grammar's conflicts are one of the two outcomes
-# Makefile.SH says to expect (29 shift/reduce and 59 reduce/reduce, or 27
-# and 61), so a yacc that resolves the grammar differently is noticed.
-# The generated code depends on the bison version; docs/M0-AUDIT.md
-# records the one used.
+# The generated parser is pinned (issue #2): it must come from GNU Bison
+# 3.8.2, and the two files must match upstream/parser.sha256, so a build
+# can't silently compile a different parser. The script also fails unless
+# the grammar's conflicts are one of the two outcomes Makefile.SH says to
+# expect (29 shift/reduce and 59 reduce/reduce, or 27 and 61).
+#
+# To change the pin (a new bison, or a patch to perl.y): set BISON_VERSION
+# below, regenerate with YACC_PERL_UPDATE=1, check the diff of
+# upstream/parser.sha256, and record it in docs/PROVENANCE.md.
 #
 # usage: scripts/yacc-perl DIR
-# YACC, if set, is used instead of "bison -y".
+# BISON, if set, is the bison to run (default: bison on PATH). It must
+# report BISON_VERSION. YACC_PERL_UPDATE=1 writes the hashes instead of
+# checking them.
 
 set -eu
 
+BISON_VERSION=3.8.2
+
 dir=$1
-yacc=${YACC:-bison -y}
+bison=${BISON:-bison}
+sums=$(cd "$(dirname "$0")/.." && pwd)/upstream/parser.sha256
+
+version=$("$bison" --version 2>/dev/null | sed -n '1s/^.* \([0-9][0-9.]*\)$/\1/p') || true
+if [ "$version" != "$BISON_VERSION" ]; then
+  cat >&2 <<END
+yacc-perl: the parser is pinned to GNU Bison $BISON_VERSION, but
+  "$bison" is ${version:-not a bison that reports its version}.
+Install bison $BISON_VERSION (Ubuntu 24.04's bison package is), or build
+it from https://ftp.gnu.org/gnu/bison/bison-$BISON_VERSION.tar.xz (sha256
+9bba0214ccf7f1079c5d59210045227bcf619519840ebfa80cd3849cff5a5bf2), and
+run make with BISON=/path/to/that/bison.
+END
+  exit 1
+fi
 
 cd "$dir"
 rm -f y.tab.c y.tab.h perl.c perly.h
-$yacc -d perl.y 2> yacc.log || { cat yacc.log >&2; exit 1; }
+"$bison" -y -d perl.y 2> yacc.log || { cat yacc.log >&2; exit 1; }
 sr=$(sed -n 's/.* \([0-9][0-9]*\) shift\/reduce conflict.*/\1/p' yacc.log)
 rr=$(sed -n 's/.* \([0-9][0-9]*\) reduce\/reduce conflict.*/\1/p' yacc.log)
 case "$sr/$rr" in
@@ -33,3 +55,15 @@ esac
 mv y.tab.c perl.c
 mv y.tab.h perly.h
 echo 'extern YYSTYPE yylval;' >> perly.h
+
+if [ "${YACC_PERL_UPDATE:-}" = 1 ]; then
+  sha256sum perl.c perly.h > "$sums"
+elif ! sha256sum -c --quiet "$sums" >&2; then
+  cat >&2 <<END
+yacc-perl: the generated parser differs from the pinned one
+  ($sums), although bison reports $BISON_VERSION.
+If perl.y was changed on purpose, update the pin (see this script's
+header); otherwise this bison doesn't generate what $BISON_VERSION should.
+END
+  exit 1
+fi

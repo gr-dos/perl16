@@ -1,0 +1,217 @@
+#!/usr/bin/env perl
+
+use 5.036;
+use warnings;
+use autodie qw(open close);
+use File::Copy qw(copy);
+use File::Find qw(find);
+use File::Path qw(make_path remove_tree);
+use File::Spec;
+use FindBin;
+use lib $FindBin::Bin;
+use DosRun qw(write_config run_batch dos_files slurp);
+
+=head1 NAME
+
+run-install - test an installed PERL.EXE: drives, paths, @INC, TEMP
+
+=head1 SYNOPSIS
+
+  tests/run-install PERL.EXE EXETEST.EXE ETEMPTST.EXE ERR2OUT.EXE
+
+=head1 DESCRIPTION
+
+Installs PERL.EXE twice, as C:\PERL\PERL.EXE and D:\TOOLS\PERL\PERL.EXE,
+each with a F<LIB\RELOC.PL> that says which installation it is, and runs
+it in one DOSBox-X session (emulated 8086) in the ways
+docs/DESIGN.md, section 5.1, lists: through PATH from another drive, by
+absolute path, by drive-relative path (D:PERL.EXE), by root-relative and
+relative path, and from unrelated current directories, one of them on a
+read-only drive (E:). Each run prints @INC and which F<RELOC.PL>
+C<require> found. Other cases cover C<-I> and C<.> precedence, where
+C<-e> puts its temporary file with TEMP and TMP set, unset, invalid or
+unusable, and that the file is removed; and that C<-P> is refused.
+
+ERR2OUT.EXE runs a command with its standard error sent to standard
+output, which DOS can't do, so error messages can be checked.
+EXETEST.EXE and ETEMPTST.EXE (all three built from F<tests/tools>) unit-test
+F<msdos/exepath.c> and F<msdos/etemp.c>: environment blocks a loader
+could get wrong, and temporary file name collisions, which can't be
+arranged from a command line.
+
+Each case's standard output is compared with a pattern (a Perl regular
+expression matched against the whole output, CRLF turned into LF), and
+its exit status with what it should be. Exits 0 if every case passes.
+
+Environment: DOSBOX, DOSBOX_TIMEOUT (seconds for the whole session,
+default 300), WORK (default build/run-install), KEEP=1 to keep it.
+
+=cut
+
+my ($perl, $exetest, $etemptst, $err2out) = @ARGV;
+die "usage: $0 PERL.EXE EXETEST.EXE ETEMPTST.EXE ERR2OUT.EXE\n"
+    unless $err2out;
+-f $_ or die "$_ not found\n" for $perl, $exetest, $etemptst, $err2out;
+my $timeout = $ENV{DOSBOX_TIMEOUT} // 300;
+
+my $work = File::Spec->rel2abs($ENV{WORK} // 'build/run-install');
+my $d = "$work/DRIVED";
+my $e = "$work/DRIVEE";
+remove_tree($work);
+make_path("$work/$_") for qw(PERL/LIB WORK/SUB WORK/ALT WORK/BIN OUT T1 T2);
+make_path("$d/TOOLS/PERL/LIB", "$e/RO");
+
+sub put ($path, $text) {
+    open my $fh, '>:raw', $path;
+    print $fh $text =~ s/\n/\r\n/gr;
+    close $fh;
+}
+
+copy($perl, "$work/PERL/PERL.EXE") or die "copy: $!\n";
+copy($perl, "$d/TOOLS/PERL/PERL.EXE") or die "copy: $!\n";
+copy($exetest, "$work/WORK/BIN/EXETEST.EXE") or die "copy: $!\n";
+copy($etemptst, "$work/WORK/BIN/ETEMPTST.EXE") or die "copy: $!\n";
+copy($err2out, "$work/WORK/BIN/ERR2OUT.EXE") or die "copy: $!\n";
+put("$work/PERL/LIB/RELOC.PL", qq{sub where { "C:\\\\PERL lib"; }\n1;\n});
+put("$d/TOOLS/PERL/LIB/RELOC.PL", qq{sub where { "D:\\\\TOOLS\\\\PERL lib"; }\n1;\n});
+put("$work/WORK/SUB/RELOC.PL", qq{sub where { "current directory"; }\n1;\n});
+put("$work/WORK/ALT/RELOC.PL", qq{sub where { "-I directory"; }\n1;\n});
+put("$work/WORK/SHOW.PL", <<'END');
+print join(";", @INC), "\n";
+require 'reloc.pl';
+print &where, "\n";
+END
+
+my $err = 'C:\WORK\BIN\ERR2OUT.EXE';
+my $show = 'C:\WORK\SHOW.PL';
+my $dperl = 'D:\TOOLS\PERL\PERL.EXE';
+my $c_inc = qr/C:\\PERL\\LIB;\.\nC:\\PERL lib\n/;
+my $d_inc = qr/D:\\TOOLS\\PERL\\LIB;\.\nD:\\TOOLS\\PERL lib\n/;
+my $etmp = q{-e "print $0, qq/\n/;"};
+
+# name, setup lines, command, expected output, expected status (0, or
+# 'nonzero')
+my @cases = (
+    # @INC from where PERL.EXE is (docs/DESIGN.md, section 5.1)
+    [ 'path', ['set PATH=D:\TOOLS\PERL;Z:\\'], "perl $show", $d_inc ],
+    [ 'pathlc', ['set PATH=d:\tools\perl;Z:\\'], "perl $show", $d_inc ],
+    [ 'abs', [], "$dperl $show", $d_inc ],
+    [ 'absc', [], "C:\\PERL\\PERL.EXE $show", $c_inc ],
+    [ 'drvrel', [], "D:PERL.EXE $show", $d_inc ],
+    [ 'drvrel2', ['D:', 'cd \TOOLS', 'C:'], "D:PERL\\PERL.EXE $show", $d_inc ],
+    [ 'rootrel', [], "\\PERL\\PERL.EXE $show", $c_inc ],
+    [ 'rootreld', ['D:'], "\\TOOLS\\PERL\\PERL.EXE $show", $d_inc ],
+    [ 'reldir', ['cd \\'], "PERL\\PERL.EXE WORK\\SHOW.PL", $c_inc ],
+    [ 'dotdot', [], "..\\..\\PERL\\PERL.EXE $show", qr/C:\\(WORK\\SUB\\\.\.\\\.\.\\)?PERL\\LIB;\.\nC:\\PERL lib\n/ ],
+    [ 'reldird', ['D:', 'cd \TOOLS'], "PERL\\PERL.EXE $show", $d_inc ],
+    [ 'otherdrv', ['E:', 'cd \RO'], "$dperl $show", $d_inc ],
+    [ 'cwdother', ['cd \WORK\ALT'], "$dperl $show", $d_inc ],
+    # -I comes first, then LIB, then .
+    [ 'incopt', [], "$dperl -IC:\\WORK\\ALT $show",
+      qr/C:\\WORK\\ALT;D:\\TOOLS\\PERL\\LIB;\.\n-I directory\n/ ],
+    [ 'incopt2', [], "$dperl -I C:\\WORK\\ALT -I. $show",
+      qr/C:\\WORK\\ALT;\.;D:\\TOOLS\\PERL\\LIB;\.\n-I directory\n/ ],
+    [ 'nolib', ['D:', 'cd \TOOLS', 'ren PERL\LIB\RELOC.PL RELOC.OFF', 'C:'],
+      "$dperl $show", qr/D:\\TOOLS\\PERL\\LIB;\.\ncurrent directory\n/ ],
+    [ 'nolibfix', ['D:', 'cd \TOOLS', 'ren PERL\LIB\RELOC.OFF RELOC.PL', 'C:'],
+      "$dperl $show", $d_inc ],
+    [ 'erequire', [], "$dperl -e \"require 'reloc.pl'; print &where, qq/\\n/;\"",
+      qr/D:\\TOOLS\\PERL lib\n/ ],
+
+    # -e's temporary file (issues #3 and #4)
+    [ 'etemp', ['set TEMP=C:\T1'], "$dperl $etmp", qr/C:\\T1\\PL[0-9A-V]{6}\.TMP\n/ ],
+    [ 'etempsl', ['set TEMP=C:\T1\\'], "$dperl $etmp", qr/C:\\T1\\PL[0-9A-V]{6}\.TMP\n/ ],
+    [ 'etmp', ['set TMP=C:\T2'], "$dperl $etmp", qr/C:\\T2\\PL[0-9A-V]{6}\.TMP\n/ ],
+    [ 'etempbad', ['set TEMP=C:\NOPE', 'set TMP=C:\T2'], "$dperl $etmp",
+      qr/C:\\T2\\PL[0-9A-V]{6}\.TMP\n/ ],
+    [ 'etempdrv', ['set TEMP=D:'], "$dperl $etmp", qr/D:PL[0-9A-V]{6}\.TMP\n/ ],
+    [ 'ecwd', [], "$dperl $etmp", qr/PL[0-9A-V]{6}\.TMP\n/ ],
+    [ 'ebadcwd', ['set TEMP=C:\NOPE'], "$dperl $etmp", qr/PL[0-9A-V]{6}\.TMP\n/ ],
+    [ 'erotemp', ['E:', 'cd \RO', 'set TEMP=C:\T1'], "$dperl $etmp",
+      qr/C:\\T1\\PL[0-9A-V]{6}\.TMP\n/ ],
+    [ 'eronone', ['E:', 'cd \RO'], "$err $dperl -e \"print 1;\"",
+      qr/Can't create temporary file for -e in \.: Permission denied\n/,
+      'nonzero' ],
+    [ 'erobad', ['E:', 'cd \RO', 'set TEMP=C:\NOPE'], "$err $dperl -e \"print 1;\"",
+      qr/Can't create temporary file for -e in \.: Permission denied\n/,
+      'nonzero' ],
+    [ 'esyntax', ['set TEMP=C:\T1'], "$err $dperl -e \"print (((;\"",
+      qr/syntax error .*\n(.*\n)*/, 'nonzero' ],
+    [ 'edie', ['set TEMP=C:\T1'], "$err $dperl -e \"die qq/gone\\n/;\"",
+      qr/gone\n/, 'nonzero' ],
+    [ 'eexit', ['set TEMP=C:\T1'], "$dperl -e \"exit 3;\"", qr//, 'nonzero' ],
+
+    # -P needs sed and a C preprocessor
+    [ 'pminus', [], "$err $dperl -P $show",
+      qr/-P is not supported on MS-DOS \(it needs sed and a C preprocessor\)\n/,
+      'nonzero' ],
+    [ 'emulti', ['set TEMP=C:\T1'], "$dperl -e \"print 1;\" -e \"print 2, qq/\\n/;\"", qr/12\n/ ],
+
+    # unit tests
+    [ 'exetest', ['D:', 'cd \TOOLS\PERL', 'C:'], 'C:\WORK\BIN\EXETEST.EXE',
+      qr/(?:(?!WRONG).)*\nself C:\\WORK\\BIN\\LIB\nexetest: all right\n/s ],
+    [ 'etemptst', ['set TEMP=C:\T1'], 'C:\WORK\BIN\ETEMPTST.EXE',
+      qr/names distinct: yes\nfirst in: C:\\T1\\\nlast in TEMP: C:\\T1\\\nnext in: current directory\ncontents kept: yes\n/ ],
+);
+
+# Batch labels are numbered: DOS compares only their first 8 characters.
+my @bat = ('@echo off');
+my $i = 0;
+for my $c (@cases) {
+    my ($name, $setup, $command, $expect, $status) = @$c;
+    my $n = uc $name;
+    die "$name: name longer than 8 characters\n" if length $n > 8;
+    $i++;
+    push @bat, 'D:', 'cd \TOOLS\PERL', 'E:', 'cd \\', 'C:', 'cd \WORK\SUB',
+        'set PATH=Z:\\', 'set TEMP=', 'set TMP=', @$setup,
+        "$command >C:\\OUT\\$n.TXT",
+        "if errorlevel 1 goto f$i", "echo 0 >C:\\OUT\\$n.RC", "goto d$i",
+        ":f$i", "echo nonzero >C:\\OUT\\$n.RC", ":d$i";
+}
+push @bat, 'C:', 'echo done >C:\OUT\DONE.TXT';
+
+write_config($work, mounts => [qq{d "$d"}, qq{e "$e" -ro}]);
+my $timedout = run_batch($work, \@bat, $timeout, "$work/DOSBOX.LOG");
+
+my %out = dos_files("$work/OUT");
+my ($pass, $fail) = (0, 0);
+for my $c (@cases) {
+    my ($name, $setup, $command, $expect, $status) = @$c;
+    my $n = uc $name;
+    my @why;
+    my $got = defined $out{"$n.TXT"} ? slurp($out{"$n.TXT"}) =~ s/\r\n/\n/gr : undef;
+    my $rc = defined $out{"$n.RC"} ? slurp($out{"$n.RC"}) =~ s/\s+//gr : undef;
+    if (!defined $rc) {
+        push @why, $timedout ? 'session timed out' : 'did not finish';
+    } else {
+        push @why, "exit status $rc" if $rc ne ($status // '0');
+        push @why, 'output differs' unless $got =~ /\A$expect\z/;
+    }
+    if (@why) {
+        say "$name: FAIL: ", join('; ', @why), "\n  command: $command";
+        say "  got: $_" for split /\n/, $got // '';
+        $fail++;
+    } else {
+        $pass++;
+    }
+}
+
+# Every -e file is gone, and nothing was written on the read-only drive.
+my @left;
+find(sub { push @left, $File::Find::name if /^PL[0-9A-V]{6}\.TMP$/i }, $work);
+if (@left) {
+    say "temporary files left behind: @left";
+    $fail++;
+}
+opendir my $ro, "$e/RO";
+my @ro = grep { !/^\.\.?$/ } readdir $ro;
+if (@ro) {
+    say "files written to the read-only drive: @ro";
+    $fail++;
+}
+
+say "run-install: $pass of ", scalar(@cases), " cases passed",
+    $fail ? ", $fail failures" : '';
+say "run-install: work directory $work" if $fail || $ENV{KEEP};
+remove_tree($work) unless $fail || $ENV{KEEP};
+exit($fail ? 1 : 0);
