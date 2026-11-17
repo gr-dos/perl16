@@ -15,7 +15,10 @@
 #                    (scripts/stack-probe, scripts/mem-probe;
 #                    docs/M1-REPORT.md)
 #   make audit       runtime inventory of the interpreter's objects:
-#                    build/audit/report.txt (scripts/audit-externals)
+#                    build/audit/report.txt (scripts/audit-externals),
+#                    and of its sources recompiled against libc16's
+#                    headers: build/audit/libc16/report.txt
+#                    (scripts/audit-libc16; docs/M3-RUNTIME-AUDIT.md)
 #   make reference   fetch the historical MS-DOS port material into
 #                    build/reference (not needed to build)
 #   make clean       remove build products; keep downloads and tools
@@ -178,10 +181,14 @@ test: $(DEV)/PERL.EXE $(TEST_TOOLS)
 test-t: $(DEV)/PERL.EXE $(UPSTREAM)/.git-tree
 	perl tests/run-t $(DEV)/PERL.EXE $(UPSTREAM) tests/t-baseline.txt
 
-audit: $(DEV_OBJS) $(LIBC16L) $(TOOLS_ENV)
-	mkdir -p build/audit
+audit: $(DEV_OBJS) $(LIBC16L) $(TOOLS_ENV) scripts/audit-libc16
+	mkdir -p build/audit build/audit/libc16
 	$(WATCOM_ENV) && perl scripts/audit-externals build/audit $(LIBC16L) \
 	  $(DEV_OBJS)
+	$(WATCOM_ENV) && perl scripts/audit-libc16 build/audit/libc16 \
+	  $(LIBC16_DIR) build/audit/externals.txt \
+	  $(PERL_NAMES:%=$(SRC)/%.c) $(PORT_NAMES:%=$(SRC)/%.c) \
+	  $(P16_NAMES:%=msdos/%.c)
 
 reference:
 	sh scripts/fetch-reference build/reference

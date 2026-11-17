@@ -42,7 +42,10 @@ jobs:
       - name: Test (t/ suite)
         run: make test-t
 
+      # What the objects need from a runtime with Open Watcom's headers,
+      # and recompiled against libc16's (docs/M3-RUNTIME-AUDIT.md).
       - name: Audit
         run: |
           make audit
           cat build/audit/report.txt
+          cat build/audit/libc16/report.txt

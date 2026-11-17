@@ -9,6 +9,9 @@ DOS extender), built with Open Watcom on Linux. The plan is in
   size, memory, speed and the stack.
 - [`docs/M2-REPORT.md`](docs/M2-REPORT.md): core functionality and
   relocation.
+- [`docs/M3-RUNTIME-AUDIT.md`](docs/M3-RUNTIME-AUDIT.md): M3.1, what the
+  interpreter needs from a runtime against libc16, who provides each
+  piece, and the `libkitchen16` decision.
 
 [`docs/DOS.md`](docs/DOS.md) describes how `PERL.EXE` behaves on DOS:
 installing it, `@INC`, `-e`, limits, and what DOS can't do.
@@ -20,7 +23,8 @@ itself. It reports stack overflow instead of crashing, and passes its
 smoke, installation and Perl 3 regression tests on an emulated 8086. It
 is still a development build linked with Open Watcom's C runtime.
 **Those binaries must not be published** (DESIGN.md, section 8). There
-is no release yet; M3 replaces the runtime.
+is no release yet; M3 replaces the runtime, and its audit (M3.1) is
+done.
 
 ## Building
 
@@ -33,7 +37,8 @@ Perl 5.36 or later and, for the tests, `dosbox-x`.
     make test-t     # Perl 3.044's own t/ suite, against tests/t-baseline.txt
     make variants   # the M1 experimental builds, in build/var
     make measure    # the M1 stack and memory measurements
-    make audit      # what the interpreter needs from a C runtime
+    make audit      # what the interpreter needs from a C runtime, with
+                    # Open Watcom's headers and with libc16's
     make clean
 
 `make` fetches and checks everything else:
