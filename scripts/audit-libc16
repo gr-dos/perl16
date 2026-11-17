@@ -1,0 +1,225 @@
+#!/usr/bin/env perl
+
+use 5.036;
+use warnings;
+use autodie qw(open close);
+use File::Basename qw(basename dirname);
+use File::Copy qw(copy);
+
+=head1 NAME
+
+audit-libc16 - recompile the interpreter against libc16's headers and list what it would need
+
+=head1 SYNOPSIS
+
+  scripts/audit-libc16 OUTDIR LIBC16_DIR WATCOM_EXTERNALS SOURCE...
+
+Needs C<wcc>, C<wlink> and C<wlib> on C<PATH> (C<make audit> arranges it).
+
+=head1 DESCRIPTION
+
+C<scripts/audit-externals> lists what the development objects, compiled
+with Open Watcom's headers, need from a runtime. This script asks the
+M3 question instead: what changes when the same sources are compiled
+the way a libc16 consumer is (libc16's C<docs/ABI.md>, "Consumer
+build"), in the large model, with C<-fpc> so that floating point is
+calls rather than x87 instructions:
+
+  wcc -zl -zld -x -ml -0 -s -fpc -zc -bt=dos -DMSDOS -DCRIPPLED_CC
+      -I<each SOURCE's directory> -I LIBC16_DIR/include
+      -I scripts/audit-include ...
+
+C<scripts/audit-include> stands in for the headers libc16 lacks
+(C<setjmp.h>, C<signal.h>, C<math.h>, C<process.h>, C<varargs.h>) and is
+force-included for a few missing macros. Its declarations use the
+register convention, so what they declare shows up as C<name_>.
+
+Each SOURCE is compiled into OUTDIR. Compile errors and C<W131> ("no
+prototype found") are recorded per module. The objects that compiled
+are linked twice with no default libraries: alone, to list every
+external symbol, and with LIBC16_DIR's C<LIBC16L.LIB>, to list what is
+still missing. Every symbol is classified:
+
+=over
+
+=item libc16
+
+a C<__cdecl> reference (C<_name>) made through a libc16 header
+
+=item regconv
+
+a register-convention reference (C<name_>): the call site saw no libc16
+declaration, either because there was none in scope (C<W131>) or because
+Perl's own K&R declaration (C<char *strcpy();>) or an audit stub
+declared it. If libc16 has C<_name> the fix is in perl16's sources;
+otherwise the function is missing.
+
+=item softfp
+
+an Open Watcom C<-fpc> floating-point support routine (C<__FDx>,
+C<__EDx>, conversions)
+
+=item helper
+
+an integer arithmetic support routine (C<__I4M> and so on)
+
+=item data
+
+a variable
+
+=back
+
+WATCOM_EXTERNALS is C<scripts/audit-externals>' F<externals.txt>; the
+report says which of its symbols disappear and which are new.
+
+Writes OUTDIR/report.txt, OUTDIR/diagnostics.txt, OUTDIR/nolib.map and
+OUTDIR/libc16.map, and prints the summary.
+
+=cut
+
+my ($out, $libc16, $watcom_ext, @srcs) = @ARGV;
+die "usage: $0 OUTDIR LIBC16_DIR WATCOM_EXTERNALS SOURCE...\n" unless @srcs;
+my $lib = "$libc16/lib/LIBC16L.LIB";
+my $stubs = 'scripts/audit-include';
+
+# Each source's directory is on the include path, in order (build/src,
+# then msdos), as the development build has them.
+my %seen;
+my @dirs = grep { !$seen{$_}++ } map { dirname($_) } @srcs;
+my @cflags = (qw(-q -zq -zl -zld -x -ml -0 -s -fpc -zc -bt=dos -DMSDOS
+    -DCRIPPLED_CC), "-fi=$stubs/audit.h", (map { "-I$_" } @dirs),
+    "-I$libc16/include", "-I$stubs");
+
+# Compile.
+my (%failed, %noproto, @objs);
+open my $diag, '>', "$out/diagnostics.txt";
+for my $src (@srcs) {
+    my $mod = basename($src, '.c');
+    my $obj = "$out/$mod.obj";
+    unlink $obj;
+    my @msg = qx(wcc @cflags -fo=$obj $src 2>&1);
+    print $diag @msg;
+    for (@msg) {
+        $noproto{$1}{$mod} = 1 if /W131: No prototype found for function '(\w+)'/;
+        push @{ $failed{$mod} }, $1 if /Error! (E\d+: .*)/;
+    }
+    push @objs, $obj if -f $obj && !$failed{$mod};
+}
+close $diag;
+
+sub undefined ($name, @extra) {
+    my $lnk = "$out/$name.lnk";
+    open my $l, '>', $lnk;
+    say $l "option quiet, nodefaultlibs, undefsok, map=$out/$name.map";
+    say $l "format dos name $out/$name.exe";
+    say $l "file $_" for @objs;
+    say $l $_ for @extra;
+    close $l;
+    my %refs;
+    for (qx(wlink \@$lnk 2>&1)) {
+        next unless /file ([^\s(]+)\S*: undefined symbol (\S+)/;
+        my ($obj, $sym) = ($1, $2);
+        $refs{$sym}{ basename($obj, '.obj') } = 1;
+    }
+    unlink "$out/$name.exe";
+    return \%refs;
+}
+
+my $refs = undefined('nolib');
+die "audit-libc16: wlink reported no undefined symbols\n" unless %$refs;
+my $left = undefined('libc16', "library $lib");
+
+# libc16's public symbols.
+copy($lib, "$out/libc16l.lib") or die "copy $lib: $!\n";
+system('wlib', '-q', "-l=$out/libc16l.lst", "$out/libc16l.lib") == 0
+    or die "audit-libc16: wlib failed\n";
+unlink "$out/libc16l.lib";
+my %have;
+open my $lst, '<', "$out/libc16l.lst";
+while (<$lst>) {
+    $have{$1} = 1 if /^(\S+?)\.\.\./;
+}
+close $lst;
+
+# The Watcom-header audit, by C name.
+my %wat;
+open my $we, '<', $watcom_ext;
+while (<$we>) {
+    chomp;
+    $wat{ cname($_) } = $_;
+}
+close $we;
+
+sub cname ($sym) {
+    return $1 if $sym =~ /^(_?[a-z]\w*?)_\z/;   # name_ (register)
+    return $1 if $sym =~ /^_([a-z]\w*)\z/;      # _name (__cdecl, data)
+    return $sym;
+}
+
+sub classify ($sym) {
+    return 'softfp' if $sym =~ /^__(?:[FE]D[A-Z]|FD[A-Z]\w*|[IU]4FD|FSFD|FDFS)\z/;
+    return 'helper' if $sym =~ /^__[IU][48]/;
+    return 'regconv' if $sym =~ /^_?[a-z]\w*_\z/;
+    return 'stub' if $sym =~ /^___audit_/;
+    return 'libc16' if $sym =~ /^___libc16_/;
+    return 'data' if $sym eq '_environ';
+    return 'libc16' if $sym =~ /^_[a-z]\w*\z/;
+    return 'other';
+}
+
+my (%count, @rows);
+for my $sym (sort { lc cname($a) cmp lc cname($b) or $a cmp $b } keys %$refs) {
+    my $kind = classify($sym);
+    my $c = cname($sym);
+    my $status;
+    if ($kind eq 'regconv') {
+        my $why = (grep { $noproto{$c} && $noproto{$c}{$_} } keys %{ $refs->{$sym} })
+            ? 'undeclared' : 'declared';
+        $status = ($have{"_$c"} ? 'in-libc16' : 'missing') . "/$why";
+    }
+    else {
+        $status = $left->{$sym} ? 'missing' : 'resolved';
+    }
+    my $was = $wat{$c} // '-';
+    push @rows, [$sym, $kind, $status, $was,
+        join ' ', sort keys %{ $refs->{$sym} }];
+    $count{$kind}{$status}++;
+}
+my %cnames = map { cname($_) => 1 } keys %$refs;
+my @gone = sort grep { !$cnames{$_} } keys %wat;
+
+my @summary = (sprintf '%d sources, %d compiled; %d external symbols',
+    scalar @srcs, scalar @objs, scalar keys %$refs);
+for my $kind (qw(libc16 regconv helper softfp data stub other)) {
+    next unless $count{$kind};
+    my $n = 0;
+    $n += $_ for values %{ $count{$kind} };
+    push @summary, sprintf '  %-8s %3d (%s)', $kind, $n, join ', ',
+        map { "$count{$kind}{$_} $_" } sort keys %{ $count{$kind} };
+}
+push @summary, sprintf '  still undefined with %s: %d', basename($lib),
+    scalar keys %$left;
+push @summary, "  failed to compile: $_: $failed{$_}[0]" for sort keys %failed;
+
+open my $r, '>', "$out/report.txt";
+say $r $_ for @summary;
+say $r '';
+say $r 'status: resolved/missing = whether LIBC16L.LIB defines it;';
+say $r 'regconv: in-libc16/missing = whether LIBC16L.LIB has _name;';
+say $r '  undeclared = W131 in a module that uses it, declared = a K&R or stub declaration';
+say $r 'watcom: the symbol in the Open Watcom-header audit (- = new)';
+say $r '';
+printf $r "%-18s %-8s %-22s %-18s %s\n", qw(symbol kind status watcom), 'used by';
+printf $r "%-18s %-8s %-22s %-18s %s\n", @$_ for @rows;
+say $r '';
+say $r 'In the Open Watcom-header audit only:';
+say $r "  $wat{$_}" for @gone;
+say $r '';
+say $r 'Runtime functions called with no prototype in scope (W131), by module:';
+for my $f (sort grep { $cnames{$_} } keys %noproto) {
+    say $r sprintf '  %-20s %s', $f, join ' ', sort keys %{ $noproto{$f} };
+}
+close $r;
+
+say for @summary;
+say "report: $out/report.txt";

@@ -54,6 +54,7 @@ the procedure for changing the pin.
 | `msdos/dosglob.c`, `dosglob.h` | filename globbing (docs/M2-REPORT.md, section 7) |
 | `msdos/stk16.asm` | the stack check: a guard margin, and overflow reported on standard error with status 255; in the default build since M2 (docs/M2-REPORT.md, section 4) |
 | `msdos/sswitch.c`, `msdos/brk16.asm` | running Perl on a stack segment of its own (SS != DS); M1 experiment, not in the default build |
+| `scripts/audit-include/*` | audit-only stand-ins for headers libc16 lacks, used by `scripts/audit-libc16` and never by the build; written from ISO C, POSIX and the Microsoft C interface (their `README`; docs/M3-RUNTIME-AUDIT.md, section 2) |
 | `scripts/*`, `tests/*`, `Makefile` | build, audit and test tooling |
 | `upstream/*.sha256` | hashes of the upstream source, reference material and generated parser |
 
