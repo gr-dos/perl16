@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Graham Ollis <plicease@cpan.org>
+Date: Wed, 18 Nov 2026 12:00:00 -0700
+Subject: [PATCH] msdos/config.h: RANDBITS is 15
+
+The historical port's config.h says rand() gives 31 bits, so O_RAND
+divides by 2**31. Open Watcom's rand() and libc16's both give 15
+(RAND_MAX is 32767), so rand(N) stayed below N/65536 and int(rand(N))
+was always 0. tests/smoke/rand.pl checks it (#16).
+---
+ msdos/config.h | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/msdos/config.h b/msdos/config.h
+--- a/msdos/config.h
++++ b/msdos/config.h
+@@ -471,8 +471,9 @@
+ /* RANDBITS:
+  *	This symbol contains the number of bits of random number the rand()
+  *	function produces.  Usual values are 15, 16, and 31.
++ *	Open Watcom's and libc16's rand() both give 15 (RAND_MAX 32767).
+  */
+-#define RANDBITS 31		/**/
++#define RANDBITS 15		/**/
+ 
+ /* SIG_NAME:
+  *	This symbol contains an list of signal names in order.

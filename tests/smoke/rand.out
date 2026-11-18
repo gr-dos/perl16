@@ -1,0 +1,6 @@
+rand(1000) >= 0: ok
+rand(1000) < 1000: ok
+rand(1000) reaches 900: ok
+rand(1000) below 100: ok
+rand reaches 0.9: ok
+int(rand(10)) gives 0 to 9: 0 1 2 3 4 5 6 7 8 9
