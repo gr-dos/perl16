@@ -115,9 +115,10 @@ RT_LDOPTS   = option quiet, nodefaultlibs, stack=$(STACK)
 RT_SYMS     = $(RT)/libc16.lst $(RT)/libk16.lst
 # Compile one module of the runtime build: wcc's output goes to the
 # module's .err file, shown only if the compile fails, and that file is
-# checked for library functions called without a prototype.
+# checked for library functions called without a prototype. make
+# echoes only the compile.
 RT_COMPILE  = rm -f $(@:.obj=.err) && $(WATCOM_ENV) && \
-              { $(CC) $(RT_CFLAGS) -fr=$(@:.obj=.err) -fo=$@ $< >/dev/null \
+              { $(CC) $(RT_CFLAGS) -fr=$(@:.obj=.err) -fo=$@ $< >/dev/null 2>&1 \
                 || { cat $(@:.obj=.err); exit 1; }; } && \
               { perl scripts/check-w131 $(RT_SYMS) -- $(@:.obj=.err) \
                 || { rm -f $@; exit 1; }; }
@@ -181,11 +182,13 @@ $(RT)/FPCTST.EXE: $(FPCTST_OBJS) $(LIBC16L) $(LIBK16L) $(TOOLS_ENV)
 
 $(RT)/fpctst.obj: tests/tools/fpctst.c $(P16_HEADERS) $(RT_SYMS) \
   $(TOOLS_ENV) scripts/check-w131 Makefile
-	$(RT_COMPILE)
+	@echo "$(CC) $(RT_CFLAGS) -fo=$@ $<"
+	@$(RT_COMPILE)
 
 $(RT)/execltst.obj: tests/tools/execltst.c $(P16_HEADERS) $(RT_SYMS) \
   $(TOOLS_ENV) scripts/check-w131 Makefile
-	$(RT_COMPILE)
+	@echo "$(CC) $(RT_CFLAGS) -fo=$@ $<"
+	@$(RT_COMPILE)
 
 # No check-dgroup: libc16's large-model heap grows the program's memory
 # block above the stack, outside DGROUP, so DGROUP_MIN_FREE (Open
@@ -212,12 +215,14 @@ $(RT)/%.obj: msdos/%.asm $(TOOLS_ENV) Makefile
 $(RT)/%.obj: $(SRC)/%.c $(SRC)/.stamp $(P16_HEADERS) $(RT_SYMS) \
   $(TOOLS_ENV) scripts/check-w131 Makefile
 	mkdir -p $(RT)
-	$(RT_COMPILE)
+	@echo "$(CC) $(RT_CFLAGS) -fo=$@ $<"
+	@$(RT_COMPILE)
 
 $(RT)/%.obj: msdos/%.c $(P16_HEADERS) $(RT_SYMS) $(TOOLS_ENV) \
   scripts/check-w131 Makefile
 	mkdir -p $(RT)
-	$(RT_COMPILE)
+	@echo "$(CC) $(RT_CFLAGS) -fo=$@ $<"
+	@$(RT_COMPILE)
 
 $(SRC)/%.c: $(SRC)/.stamp ;
 
