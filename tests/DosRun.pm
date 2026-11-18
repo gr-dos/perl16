@@ -78,7 +78,10 @@ sub run_batch ($work, $lines, $timeout, $log) {
         'timeout', '-s', 'KILL', $timeout,
         $ENV{DOSBOX} // 'dosbox-x', '-nogui', '-nomenu',
         '-conf', "$work/DOSBOX.CNF");
-    return $rc >> 8 == 137;
+    # timeout exits 124 when it kills the command (137 if it was killed
+    # itself)
+    my $st = $rc >> 8;
+    return $st == 124 || $st == 137;
 }
 
 sub dos_files ($work) {
