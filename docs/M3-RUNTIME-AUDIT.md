@@ -10,8 +10,9 @@ exist. It changes no code that goes into `PERL.EXE`.
 Measured on 2026-11-17 with:
 
 - Open Watcom 2026-10-01-Build, the snapshot both libc16 0.04 and 0.07 pin;
-- libc16 0.07 (the latest release, `c23f0c7`), now pinned in
-  `scripts/fetch-libc16`;
+- libc16 0.07 (then the latest release, `c23f0c7`), pinned at the time in
+  `scripts/fetch-libc16` (perl16 now pins libc16 0.12 and libkitchen16
+  0.02: section 11.6);
 - Perl 3.044 plus `patches/0001`–`0008`, as at the M2 merge (`51df9eb`).
 
 Section 13 has the commands that reproduce every number.
@@ -777,8 +778,10 @@ What this means for perl16:
 - **Release 0.02** (0.01 was the first). The pin is `version=0.02`,
   `sha256=2ca356b7d2a23442b7851b10c09cfa577ee3888eaf5b4b899f10ee494162cb85`
   (`libkitchen16-0.02.zip.sha256`). It was built against libc16 0.07.
-  perl16 will pin libc16 0.12, so M3.4 must check that the two work
-  together: libkitchen16 uses libc16's `errno` and `FILE` output.
+  perl16 pins it with libc16 0.12 (section 11.6), which libkitchen16
+  allows (that version or newer). M3.4, which links them, checks that
+  the two work together: libkitchen16 uses libc16's `errno` and `FILE`
+  output.
 - **Larger than budgeted.** libkitchen16's `make size`
   ([libkitchen16#6](https://github.com/gr-dos/libkitchen16/pull/6))
   links perl16's set of functions in the large model. That is the
@@ -815,6 +818,45 @@ What this means for perl16:
   against libkitchen16, because perl16 has not migrated. It is #15's
   remaining acceptance test.
 
+### 11.6 Pins
+
+perl16 pins **libc16 0.12** (`scripts/fetch-libc16`) and **libkitchen16
+0.02** (`scripts/fetch-libkitchen16`, new), each by its release's
+SHA-256. The Makefile fails if the two name different Open Watcom
+snapshots. They name the same one, so `build/dev/PERL.EXE` is unchanged
+(sha256 `8fc09f08…`, 282,204 bytes). Until M3.4 links them, they serve
+the toolchain pin and `make audit`.
+
+`scripts/audit-libc16` now compiles with libkitchen16's headers before
+libc16's, as libkitchen16's consumers do, and links `LIBK16L.LIB` with
+`LIBC16L.LIB`. The stand-ins for `setjmp.h`, `signal.h`, `process.h` and
+`math.h` are gone, because the two libraries provide them. Its
+2026-11-18 run, against sections 4 to 6's run against 0.07:
+
+- **Every interface assigned to libc16 or libkitchen16 is in a pinned
+  library.** 50 `__cdecl` references resolve in libc16. All 16 `-fpc`
+  helpers resolve in libkitchen16.
+- **The register-convention calls (section 5.3) remain, and are perl16's
+  to fix (#16).**
+  - 36 are to libc16 functions: 9 declared by Perl, 27 undeclared.
+  - 13 are to libkitchen16's. 10 are the math functions, `atof` and
+    `vsprintf`, which Perl declares itself in K&R style. 3 are `printf`,
+    `fprintf` and `sprintf`, which are undeclared: nothing includes
+    `<kitchen16.h>` yet.
+- **Still missing, all perl16's:** `_hdopen`, `execl`, `execv`,
+  `execvp` and `environ` (sections 6.2 and 6.6).
+- **Three modules don't compile** against the real headers. A callback
+  passed to the library has Open Watcom's register convention where
+  libc16 declares `__cdecl`:
+  - `dosglob.c`'s `qsort` comparison, as before;
+  - `stab.c`'s `signal` handler, newly reported because libc16 now has
+    `<signal.h>`;
+  - `popen.c`'s `atexit` function.
+
+  Perl's own functions in `stab.c` and `popen.c` therefore show as
+  missing until they compile. They are on #16's list.
+
+
 ## 12. Issue breakdown
 
 These issues were opened from this audit. Each one's scope is the row
@@ -838,9 +880,9 @@ All four libc16 issues are released, and libc16 0.12 (2026-11-18) has every
 one of them. 0.12 also reserves code offset 0 in the small and compact
 models so that no function pointer is null
 ([libc16#27](https://github.com/gr-dos/libc16/issues/27)); perl16 is
-large-model and unaffected. M3.4 pins 0.12
-([#16](https://github.com/gr-dos/perl16/issues/16)) and runs `make audit`
-again; the counts in sections 4 to 6 are against 0.07.
+large-model and unaffected. perl16 now pins 0.12, with libkitchen16
+0.02. Section 11.6 has the audit against both; the counts in sections 4
+to 6 are against 0.07.
 
 ## 13. Reproducing
 

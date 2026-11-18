@@ -16,8 +16,9 @@
 #                    docs/M1-REPORT.md)
 #   make audit       runtime inventory of the interpreter's objects:
 #                    build/audit/report.txt (scripts/audit-externals),
-#                    and of its sources recompiled against libc16's
-#                    headers: build/audit/libc16/report.txt
+#                    and of its sources recompiled against libc16's and
+#                    libkitchen16's headers and linked with both
+#                    libraries: build/audit/libc16/report.txt
 #                    (scripts/audit-libc16; docs/M3-RUNTIME-AUDIT.md)
 #   make reference   fetch the historical MS-DOS port material into
 #                    build/reference (not needed to build)
@@ -44,6 +45,9 @@ DEV         := build/dev
 LIBC16_ROOT ?= build/libc16
 LIBC16_DIR  := $(if $(wildcard $(LIBC16_ROOT)/build/stage/VERSION),$(LIBC16_ROOT)/build/stage,$(LIBC16_ROOT))
 LIBC16L     := $(LIBC16_DIR)/lib/LIBC16L.LIB
+LIBKITCHEN16_ROOT ?= build/libkitchen16
+LIBKITCHEN16_DIR  := $(if $(wildcard $(LIBKITCHEN16_ROOT)/build/stage/VERSION),$(LIBKITCHEN16_ROOT)/build/stage,$(LIBKITCHEN16_ROOT))
+LIBK16L     := $(LIBKITCHEN16_DIR)/lib/LIBK16L.LIB
 TOOLS_ENV   := build/tools.env
 WATCOM_ENV   = . ./$(TOOLS_ENV) && PATH=$$WATCOM/binl64:$$PATH
 
@@ -127,8 +131,20 @@ $(LIBC16L): scripts/fetch-libc16
 	sh scripts/fetch-libc16 $(LIBC16_ROOT)
 endif
 
-# The Open Watcom snapshot libc16 names, as shell assignments.
-$(TOOLS_ENV): $(LIBC16L)
+# The pinned libkitchen16 release (scripts/fetch-libkitchen16): floating
+# point, formatting and <math.h> (docs/M3-RUNTIME-AUDIT.md, section 11),
+# for the audit until M3.4 links it. It must name the same Open Watcom
+# snapshot as libc16.
+ifeq ($(LIBKITCHEN16_ROOT),build/libkitchen16)
+$(LIBK16L): scripts/fetch-libkitchen16
+	sh scripts/fetch-libkitchen16 $(LIBKITCHEN16_ROOT)
+endif
+
+# The Open Watcom snapshot libc16 names, as shell assignments; the
+# libkitchen16 release must name the same one.
+$(TOOLS_ENV): $(LIBC16L) $(LIBK16L)
+	test "$$(sed -n 's/^sha256=//p' $(LIBC16_DIR)/tools/fetch-watcom)" \
+	  = "$$(sed -n 's/^sha256=//p' $(LIBKITCHEN16_DIR)/tools/fetch-watcom)"
 	mkdir -p build
 	watcom=$$(sh $(LIBC16_DIR)/tools/fetch-watcom $(CURDIR)/build/tools) \
 	  && printf 'WATCOM=%s\nexport WATCOM\n' "$$watcom" > $@
@@ -181,11 +197,12 @@ test: $(DEV)/PERL.EXE $(TEST_TOOLS)
 test-t: $(DEV)/PERL.EXE $(UPSTREAM)/.git-tree
 	perl tests/run-t $(DEV)/PERL.EXE $(UPSTREAM) tests/t-baseline.txt
 
-audit: $(DEV_OBJS) $(LIBC16L) $(TOOLS_ENV) scripts/audit-libc16
+audit: $(DEV_OBJS) $(LIBC16L) $(LIBK16L) $(TOOLS_ENV) scripts/audit-libc16
 	mkdir -p build/audit build/audit/libc16
 	$(WATCOM_ENV) && perl scripts/audit-externals build/audit $(LIBC16L) \
 	  $(DEV_OBJS)
-	$(WATCOM_ENV) && perl scripts/audit-libc16 build/audit/libc16 \
+	$(WATCOM_ENV) && perl scripts/audit-libc16 \
+	  --libkitchen16 $(LIBKITCHEN16_DIR) build/audit/libc16 \
 	  $(LIBC16_DIR) build/audit/externals.txt \
 	  $(PERL_NAMES:%=$(SRC)/%.c) $(PORT_NAMES:%=$(SRC)/%.c) \
 	  $(P16_NAMES:%=msdos/%.c)

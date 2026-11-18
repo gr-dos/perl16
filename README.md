@@ -23,8 +23,8 @@ itself. It reports stack overflow instead of crashing, and passes its
 smoke, installation and Perl 3 regression tests on an emulated 8086. It
 is still a development build linked with Open Watcom's C runtime.
 **Those binaries must not be published** (DESIGN.md, section 8). There
-is no release yet; M3 replaces the runtime, and its audit (M3.1) is
-done.
+is no release yet. M3 replaces the runtime. Its audit (M3.1) is done,
+and the libc16 and libkitchen16 releases it called for are pinned.
 
 ## Building
 
@@ -38,14 +38,17 @@ Perl 5.36 or later and, for the tests, `dosbox-x`.
     make variants   # the M1 experimental builds, in build/var
     make measure    # the M1 stack and memory measurements
     make audit      # what the interpreter needs from a C runtime, with
-                    # Open Watcom's headers and with libc16's
+                    # Open Watcom's headers, and with libc16's and libkitchen16's
     make clean
 
 `make` fetches and checks everything else:
 
 - tag `perl-3.044` of the Perl repository (`scripts/fetch-upstream`)
-- the pinned libc16 release (`scripts/fetch-libc16`)
-- the Open Watcom snapshot that libc16 names
+- the pinned libc16 release (`scripts/fetch-libc16`, 0.12)
+- the pinned libkitchen16 release (`scripts/fetch-libkitchen16`, 0.02),
+  floating point and formatting for M3
+- the Open Watcom snapshot that libc16 names (libkitchen16 must name the
+  same one)
 
 It then applies `patches/` and generates the parser, which it checks
 against `upstream/parser.sha256`.
