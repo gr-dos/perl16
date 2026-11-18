@@ -748,7 +748,11 @@ As of 2026-11-18, `gr-dos/libkitchen16` exists. Its first
 implementation is merged
 ([libkitchen16#1](https://github.com/gr-dos/libkitchen16/pull/1),
 `d36fac5`) and released as
-[0.01](https://github.com/gr-dos/libkitchen16/releases/tag/v0.01). It
+[0.01](https://github.com/gr-dos/libkitchen16/releases/tag/v0.01). Measured
+sizes, speed and a no-coprocessor test followed
+([libkitchen16#6](https://github.com/gr-dos/libkitchen16/pull/6)), and the
+current release is
+[0.02](https://github.com/gr-dos/libkitchen16/releases/tag/v0.02). It
 follows sections 11.2 and 11.3:
 
 - **Modules.** `fpc` (the 17 helpers of section 11.2, in the small,
@@ -770,9 +774,9 @@ follows sections 11.2 and 11.3:
 
 What this means for perl16:
 
-- **Release 0.01.** The pin is `version=0.01`,
-  `sha256=0c3b27f9de469a6a7071bb27adde191484ccd5bde31c72a6e523afc9e4918379`
-  (`libkitchen16-0.01.zip.sha256`). It was built against libc16 0.07.
+- **Release 0.02** (0.01 was the first). The pin is `version=0.02`,
+  `sha256=2ca356b7d2a23442b7851b10c09cfa577ee3888eaf5b4b899f10ee494162cb85`
+  (`libkitchen16-0.02.zip.sha256`). It was built against libc16 0.07.
   perl16 will pin libc16 0.12, so M3.4 must check that the two work
   together: libkitchen16 uses libc16's `errno` and `FILE` output.
 - **Larger than budgeted.** libkitchen16's `make size`
@@ -790,12 +794,23 @@ What this means for perl16:
   27 ms, `atof` 35 ms, `sin` 72 ms and `pow` 0.4 s, in the large model.
   M3.4 compares perl16's workloads against M2's Open Watcom
   emulator, and reports slowdowns to libkitchen16.
-- **NaN comparisons.** `__FDC` and `__EDC` report an unordered
-  comparison as `a > b`, so `NaN > x` and `NaN >= x` are true
-  ([libkitchen16#2](https://github.com/gr-dos/libkitchen16/issues/2)
-  investigates whether the `-fpc` ABI allows better). Perl 3 can make a
-  NaN, for example `9**9**9 - 9**9**9`. M3.4 should test `<`, `>` and
-  `<=>` with one.
+- **Comparisons the compiler gets wrong.**
+  [libkitchen16#2](https://github.com/gr-dos/libkitchen16/issues/2),
+  closed in 0.02, found two limits in the code `wcc -fpc` generates. The
+  helpers can't fix them. They're described in libkitchen16's
+  `docs/CONSUMERS.md`, "Migration notes", and `docs/spec/fpc.md`:
+  - **NaN.** `x > y` and `x >= y` are true when either is a NaN. Perl 3
+    can make one, for example `9**9**9 - 9**9**9`.
+  - **A literal zero.** `x == 0.0`, `x != 0.0`, `x < 0.0`, `!x`,
+    `if (x)`, `x && y` and `x ? a : b` test only the high 16 bits of
+    `x`. So `-0.0` is non-zero, and a subnormal below about `1.4e-309`
+    is zero.
+
+  Perl 3's truth test of a number and its comparisons with `0.0` are the
+  first places to look. M3.4 rewrites any that matter with
+  libkitchen16's tested idioms: a zero that isn't a literal, and an
+  explicit NaN test. It adds Perl tests for `<`, `>`, `<=>` and
+  truth with a NaN, `-0.0` and a subnormal.
 - **`fpfmt` not run yet.** perl16's `fpfmt` smoke test has not been run
   against libkitchen16, because perl16 has not migrated. It is #15's
   remaining acceptance test.
@@ -811,7 +826,7 @@ below, and its detail is the section of this document it cites.
 | [gr-dos/libc16#20](https://github.com/gr-dos/libc16/issues/20) | system, the spawn family and getpid | section 6.6: `system`, `spawnv`, `spawnve`, `spawnvp`, `spawnvpe`, `spawnl` (`P_WAIT`), `getpid` | M3.2 | done in [libc16#25](https://github.com/gr-dos/libc16/pull/25), 0.10 |
 | [gr-dos/libc16#21](https://github.com/gr-dos/libc16/issues/21) | signal and raise (C89 7.7), SIGINT through INT 23h | sections 6.6, 7.4 | M3.2 | done in [libc16#26](https://github.com/gr-dos/libc16/pull/26), 0.11 |
 | [gr-dos/libc16#22](https://github.com/gr-dos/libc16/issues/22) | small C89 and Microsoft C functions for perl16 | sections 6.2–6.7: `atexit`; `time`, `gmtime`; `rand`, `srand`; `isatty`, `dup`, `dup2`, `fdopen`, `rmdir`, `strupr` | M3.2 | done in [libc16#23](https://github.com/gr-dos/libc16/pull/23), 0.08 |
-| [#15](https://github.com/gr-dos/perl16/issues/15) | M3.3: create gr-dos/libkitchen16 | section 11: `fpc`, `fmt`, `fmtio`, `conv`, `math` | M3.3 | implemented in [libkitchen16#1](https://github.com/gr-dos/libkitchen16/pull/1), released in 0.01; `fpfmt` still to run |
+| [#15](https://github.com/gr-dos/perl16/issues/15) | M3.3: create gr-dos/libkitchen16 | section 11: `fpc`, `fmt`, `fmtio`, `conv`, `math` | M3.3 | implemented in [libkitchen16#1](https://github.com/gr-dos/libkitchen16/pull/1), released in 0.01 (now 0.02); `fpfmt` still to run |
 | [#16](https://github.com/gr-dos/perl16/issues/16) | M3.4: perl16 sources against libc16's headers | section 5.3, 7.9, 7.10: declarations and includes, `__cdecl` callbacks, `<stdarg.h>`, `stdaux`/`stdprn`, `_hdopen`, `RANDBITS` | M3.4 | open |
 | [#17](https://github.com/gr-dos/perl16/issues/17) | M3.4: perl16's DOS shims for libc16 | sections 6.2–6.6, 7.1, 7.5–7.7, 10: `environ`, `exec` emulation, the piped-open temporary file, `stk16.asm` on `_end`, the INT 24h handler, the ctype and stream-buffering measurements | M3.4 | open |
 
