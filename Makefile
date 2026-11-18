@@ -108,6 +108,10 @@ RT_OBJS     = $(RT)/stk16.obj $(PERL_NAMES:%=$(RT)/%.obj) \
               $(PORT_NAMES:%=$(RT)/%.obj) $(P16_NAMES:%=$(RT)/%.obj) \
               $(RT_NAMES:%=$(RT)/%.obj) $(RT)/p16init.obj
 RT_LDOPTS   = option quiet, nodefaultlibs, stack=$(STACK)
+
+# tests/run-install's DOS tools (below)
+TEST_TOOLS  = $(DEV)/EXETEST.EXE $(DEV)/ETEMPTST.EXE $(DEV)/ERR2OUT.EXE
+
 PATCHES     = $(sort $(wildcard patches/*.patch))
 
 all: $(DEV)/PERL.EXE
@@ -242,8 +246,8 @@ measure: variants $(UPSTREAM)/.git-tree
 
 # DOS tools for tests/run-install: unit tests of perl16's own code, built
 # like PERL.EXE, and ERR2OUT.EXE, which lets a test see standard error.
-# Like PERL.EXE, never to be published.
-TEST_TOOLS  = $(DEV)/EXETEST.EXE $(DEV)/ETEMPTST.EXE $(DEV)/ERR2OUT.EXE
+# Like PERL.EXE, never to be published. (TEST_TOOLS is set with the
+# other variables, above: test-rt names it as a prerequisite first.)
 
 $(DEV)/EXETEST.EXE: tests/tools/exetest.c $(DEV)/exepath.obj $(P16_HEADERS) \
   $(TOOLS_ENV)
