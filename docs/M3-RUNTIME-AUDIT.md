@@ -975,7 +975,8 @@ hour each):
 - `make test`: 21 passed, `fpfmt` todo; 35 of 35 install cases.
 - `make test-rt`: 22 of 22 passed, `hashbig` and `recurse` among them,
   within the unchanged 60 s limit; 36 of 36 install cases (the 35, and
-  `EXECLTST.EXE`). `fpfmt` passes, but is still marked todo.
+  `EXECLTST.EXE`). `fpfmt` passes, but was still marked todo (now only
+  for the development build; below).
 - `make test-t-rt`: 53 of 72 `t/` scripts pass, the development
   build's baseline exactly; `lib.big` passes within the 120 s limit.
 - With 0.12, `hashbig`, `recurse` and `lib.big` gave the right output
@@ -1042,6 +1043,10 @@ exits with `P16EXIT`:
 **Tests, 2026-11-18, with libc16 0.15.**
 - `make test`: 21 passed, `fpfmt` todo; 35 of 35 install cases.
 - `make test-rt`: 22 of 22 smoke, 2 of 2 `smoke-rt`, 36 of 36 install.
+  `fpfmt` is among the 22 and is now required: its todo is
+  `# todo-dev`, which `tests/run-dos` applies only with `BUILD=dev`
+  (`make test`), so a runtime build whose formatting regressed fails
+  `make test-rt` and CI (#15).
 - `make test-t-rt`: 53 of 72, the baseline.
 - `make audit`: all 25 sources compile.
 - The link map has `LIBC16L.LIB` (109 modules, `systeme` among them)
@@ -1061,7 +1066,7 @@ below, and its detail is the section of this document it cites.
 | [gr-dos/libc16#20](https://github.com/gr-dos/libc16/issues/20) | system, the spawn family and getpid | section 6.6: `system`, `spawnv`, `spawnve`, `spawnvp`, `spawnvpe`, `spawnl` (`P_WAIT`), `getpid` | M3.2 | done in [libc16#25](https://github.com/gr-dos/libc16/pull/25), 0.10 |
 | [gr-dos/libc16#21](https://github.com/gr-dos/libc16/issues/21) | signal and raise (C89 7.7), SIGINT through INT 23h | sections 6.6, 7.4 | M3.2 | done in [libc16#26](https://github.com/gr-dos/libc16/pull/26), 0.11 |
 | [gr-dos/libc16#22](https://github.com/gr-dos/libc16/issues/22) | small C89 and Microsoft C functions for perl16 | sections 6.2–6.7: `atexit`; `time`, `gmtime`; `rand`, `srand`; `isatty`, `dup`, `dup2`, `fdopen`, `rmdir`, `strupr` | M3.2 | done in [libc16#23](https://github.com/gr-dos/libc16/pull/23), 0.08 |
-| [#15](https://github.com/gr-dos/perl16/issues/15) | M3.3: create gr-dos/libkitchen16 | section 11: `fpc`, `fmt`, `fmtio`, `conv`, `math` | M3.3 | implemented in [libkitchen16#1](https://github.com/gr-dos/libkitchen16/pull/1), released in 0.01 (now 0.02); `fpfmt` still to run |
+| [#15](https://github.com/gr-dos/perl16/issues/15) | M3.3: create gr-dos/libkitchen16 | section 11: `fpc`, `fmt`, `fmtio`, `conv`, `math` | M3.3 | implemented in [libkitchen16#1](https://github.com/gr-dos/libkitchen16/pull/1), released in 0.01 (now 0.02); `fpfmt` passes in the runtime build, which `make test-rt` requires: done |
 | [#16](https://github.com/gr-dos/perl16/issues/16) | M3.4: perl16 sources against libc16's headers | section 5.3, 7.9, 7.10: declarations and includes, `__cdecl` callbacks, `<stdarg.h>`, `stdaux`/`stdprn`, `_hdopen`, `RANDBITS` | M3.4 | open |
 | [#17](https://github.com/gr-dos/perl16/issues/17) | M3.4: perl16's DOS shims for libc16 | sections 6.2–6.6, 7.1, 7.5–7.7, 10: `environ`, `exec` emulation, the piped-open temporary file, `stk16.asm` on `_end`, the INT 24h handler, the ctype and stream-buffering measurements | M3.4 | open |
 

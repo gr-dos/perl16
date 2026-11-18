@@ -140,8 +140,8 @@ rt: $(RT)/PERL.EXE
 # their own work directories, and EXECLTST.EXE; then tests/smoke-rt,
 # its own cases (system() with %ENV, #22), with TAILTST.EXE.
 test-rt: $(RT)/PERL.EXE $(TEST_TOOLS) $(RT)/EXECLTST.EXE $(DEV)/TAILTST.EXE
-	WORK=build/run-dos-rt perl tests/run-dos $(RT)/PERL.EXE tests/smoke
-	WORK=build/run-dos-rt2 FILES=$(DEV)/TAILTST.EXE perl tests/run-dos \
+	WORK=build/run-dos-rt BUILD=rt perl tests/run-dos $(RT)/PERL.EXE tests/smoke
+	WORK=build/run-dos-rt2 BUILD=rt FILES=$(DEV)/TAILTST.EXE perl tests/run-dos \
 	  $(RT)/PERL.EXE tests/smoke-rt
 	WORK=build/run-install-rt perl tests/run-install $(RT)/PERL.EXE \
 	  $(TEST_TOOLS) $(RT)/EXECLTST.EXE
@@ -274,7 +274,7 @@ $(DEV)/ERR2OUT.EXE: tests/tools/err2out.c $(TOOLS_ENV)
 	  wlink option quiet system dos name $@ file $(DEV)/err2out.obj
 
 test: $(DEV)/PERL.EXE $(TEST_TOOLS)
-	perl tests/run-dos $(DEV)/PERL.EXE tests/smoke
+	BUILD=dev perl tests/run-dos $(DEV)/PERL.EXE tests/smoke
 	perl tests/run-install $(DEV)/PERL.EXE $(TEST_TOOLS)
 
 test-t: $(DEV)/PERL.EXE $(UPSTREAM)/.git-tree
