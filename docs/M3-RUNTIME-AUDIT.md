@@ -744,20 +744,18 @@ is well under the 65 KB of Open Watcom runtime they replace.
 
 ## 12. Issue breakdown
 
-These issues are drafted with this audit and are still to be opened.
-Each one's scope is the row below, and its detail is the section of
-this document it cites. When they are opened, this table gets their
-links.
+These issues were opened from this audit. Each one's scope is the row
+below, and its detail is the section of this document it cites.
 
-| Repository | Title | Scope | Phase |
+| Issue | Title | Scope | Phase |
 |---|---|---|---|
-| gr-dos/libc16 | setjmp and longjmp (C89 7.6) | sections 6.3, 7.3 | M3.2 |
-| gr-dos/libc16 | system, the spawn family and getpid | section 6.6: `system`, `spawnv`, `spawnve`, `spawnvp`, `spawnvpe`, `spawnl` (`P_WAIT`), `getpid` | M3.2 |
-| gr-dos/libc16 | signal and raise (C89 7.7), SIGINT through INT 23h | sections 6.6, 7.4 | M3.2 |
-| gr-dos/libc16 | small C89 and Microsoft C functions for perl16 | sections 6.2–6.7: `atexit`; `time`, `gmtime`; `rand`, `srand`; `isatty`, `dup`, `dup2`, `fdopen`, `rmdir`, `strupr` | M3.2 |
-| gr-dos/perl16 | M3.3: create gr-dos/libkitchen16 | section 11: `fpc`, `fmt`, `fmtio`, `conv`, `math` | M3.3 |
-| gr-dos/perl16 | M3.4: perl16 sources against libc16's headers | section 5.3, 7.9, 7.10: declarations and includes, `__cdecl` callbacks, `<stdarg.h>`, `stdaux`/`stdprn`, `_hdopen`, `RANDBITS` | M3.4 |
-| gr-dos/perl16 | M3.4: perl16's DOS shims for libc16 | sections 6.2–6.6, 7.1, 7.5–7.7, 10: `environ`, `exec` emulation, the piped-open temporary file, `stk16.asm` on `_end`, the INT 24h handler, the ctype and stream-buffering measurements | M3.4 |
+| [gr-dos/libc16#18](https://github.com/gr-dos/libc16/issues/18) | setjmp and longjmp (C89 7.6) | sections 6.3, 7.3 | M3.2 |
+| [gr-dos/libc16#20](https://github.com/gr-dos/libc16/issues/20) | system, the spawn family and getpid | section 6.6: `system`, `spawnv`, `spawnve`, `spawnvp`, `spawnvpe`, `spawnl` (`P_WAIT`), `getpid` | M3.2 |
+| [gr-dos/libc16#21](https://github.com/gr-dos/libc16/issues/21) | signal and raise (C89 7.7), SIGINT through INT 23h | sections 6.6, 7.4 | M3.2 |
+| [gr-dos/libc16#22](https://github.com/gr-dos/libc16/issues/22) | small C89 and Microsoft C functions for perl16 | sections 6.2–6.7: `atexit`; `time`, `gmtime`; `rand`, `srand`; `isatty`, `dup`, `dup2`, `fdopen`, `rmdir`, `strupr` | M3.2 |
+| [#15](https://github.com/gr-dos/perl16/issues/15) | M3.3: create gr-dos/libkitchen16 | section 11: `fpc`, `fmt`, `fmtio`, `conv`, `math` | M3.3 |
+| [#16](https://github.com/gr-dos/perl16/issues/16) | M3.4: perl16 sources against libc16's headers | section 5.3, 7.9, 7.10: declarations and includes, `__cdecl` callbacks, `<stdarg.h>`, `stdaux`/`stdprn`, `_hdopen`, `RANDBITS` | M3.4 |
+| [#17](https://github.com/gr-dos/perl16/issues/17) | M3.4: perl16's DOS shims for libc16 | sections 6.2–6.6, 7.1, 7.5–7.7, 10: `environ`, `exec` emulation, the piped-open temporary file, `stk16.asm` on `_end`, the INT 24h handler, the ctype and stream-buffering measurements | M3.4 |
 
 The libkitchen16 issue lives in perl16 until the repository exists.
 M3.3 creates it, with its own issues.
