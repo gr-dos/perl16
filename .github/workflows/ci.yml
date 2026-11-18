@@ -50,3 +50,31 @@ jobs:
           make audit
           cat build/audit/report.txt
           cat build/audit/libc16/report.txt
+
+  # The runtime build (M3.4): PERL.EXE linked with libc16 and
+  # libkitchen16 instead of Open Watcom's runtime. A build failure, a
+  # failed smoke or installation case, or a case in tests/rt-slow.txt
+  # failing in any way but a timeout makes it fail.
+  runtime:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/tools
+          key: libc16-tools-ubuntu-24.04-${{ hashFiles('scripts/fetch-libc16') }}
+
+      - name: Install DOSBox-X, bison and patch
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dosbox-x bison patch
+
+      - name: Build
+        run: make rt
+
+      # Smoke tests, with tests/rt-slow.txt's cases (libc16#30's slow
+      # heap) allowed to time out, then the installation tests and
+      # EXECLTST.EXE.
+      - name: Test
+        run: make test-rt
