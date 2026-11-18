@@ -1,0 +1,8 @@
+# Smoke tests the runtime build (make test-rt) is allowed to time out
+# on: tests/run-dos's SLOW. Each gives the right output, but libc16's
+# heap is quadratic in its free blocks (docs/M3-RUNTIME-AUDIT.md,
+# section 11.7; gr-dos/libc16#30). Remove both when perl16#21 pins the
+# libc16 release with the fix (0.14). Any other failure of these cases
+# still fails the run.
+hashbig  libc16#30: 1,500 hash keys take about 200 s
+recurse  libc16#30: deep recursion with local() takes about 100 s

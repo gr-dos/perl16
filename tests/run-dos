@@ -42,9 +42,16 @@ takes longer than DOSBOX_TIMEOUT seconds. Its output and the result of
 its exit-status check are collected afterwards. Exits 0 if every case
 not marked todo passes.
 
+A build can have slow cases of its own. SLOW names a file of them, one
+per line as C<NAME REASON> (blank lines and C<#> comments ignored). A
+listed case that times out is reported as slow and not counted as a
+failure; one that fails in any other way (the wrong output or exit
+status) is a failure as usual, and one that passes is reported, so the
+entry can be removed. A name that isn't a case is an error.
+
 Environment: DOSBOX (default dosbox-x), DOSBOX_TIMEOUT seconds per case
 (default 60), WORK (default build/run-dos) the work directory, KEEP=1 to
-keep it.
+keep it, SLOW the file of slow cases.
 
 =cut
 
@@ -81,6 +88,17 @@ for my $dir (@dirs) {
 }
 die "no cases\n" unless @cases;
 
+if (my $slow = $ENV{SLOW}) {
+    my %case = map { $_->{name} => $_ } @cases;
+    for (split /\n/, slurp($slow)) {
+        next if /^\s*(#|$)/;
+        my ($name, $why) = /^(\S+)\s+(.+?)\s*$/
+            or die "$slow: not NAME REASON: $_\n";
+        my $c = $case{uc $name} or die "$slow: $name is not a case\n";
+        $c->{slow} = $why;
+    }
+}
+
 # Any other file in a case directory is a fixture, copied as it is under
 # its name in upper case.
 for my $dir (@dirs) {
@@ -106,7 +124,7 @@ for my $c (@cases) {
 }
 my %dosfile = dos_files($work);
 
-my ($pass, $fail, $todo) = (0, 0, 0);
+my ($pass, $fail, $todo, $slow) = (0, 0, 0, 0);
 for my $c (@cases) {
     my $n = $c->{name};
     my @why;
@@ -129,7 +147,13 @@ for my $c (@cases) {
         if ($c->{todo}) {
             say "$n: passes, but is marked todo ($c->{todo})";
         }
+        if ($c->{slow}) {
+            say "$n: passes, but is listed as slow in $ENV{SLOW} ($c->{slow})";
+        }
         $pass++;
+    } elsif ($c->{slow} && !defined $rc && $c->{timedout}) {
+        say "$n: slow: $c->{slow} (timed out after ${timeout}s)";
+        $slow++;
     } elsif ($c->{todo}) {
         say "$n: todo: $c->{todo} (" . join('; ', @why) . ')';
         $todo++;
@@ -139,8 +163,9 @@ for my $c (@cases) {
     }
 }
 
-say "run-dos: $pass passed, $fail failed, $todo todo";
+say "run-dos: $pass passed, $fail failed, $todo todo",
+    $slow ? ", $slow slow" : '';
 say "run-dos: work directory $work (output of failures in NAME.GOT)"
-    if $fail || $todo || $ENV{KEEP};
-remove_tree($work) unless $fail || $todo || $ENV{KEEP};
+    if $fail || $todo || $slow || $ENV{KEEP};
+remove_tree($work) unless $fail || $todo || $slow || $ENV{KEEP};
 exit($fail ? 1 : 0);

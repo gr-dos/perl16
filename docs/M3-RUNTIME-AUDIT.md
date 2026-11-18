@@ -928,8 +928,11 @@ register-convention call to either library.
 
 **Tests, 2026-11-18 (DOSBox-X 2026.01.02, emulated 8086).**
 - `make test`: 21 passed, `fpfmt` todo; 35 of 35 install cases.
-- `make test-rt`: 20 passed, 2 failed; 35 of 35 install cases.
-  - The failures are `hashbig` and `recurse`: the heap's slowness.
+- `make test-rt`: 20 passed, 2 slow; 36 of 36 install cases (the 35,
+  and `EXECLTST.EXE`).
+  - The slow cases are `hashbig` and `recurse`: the heap's slowness.
+    `tests/rt-slow.txt` lets them time out, and only time out, until
+    perl16#21 pins the libc16 release that fixes libc16#30.
   - `fpfmt` passes, but is still marked todo.
 
 

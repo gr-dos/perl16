@@ -132,9 +132,11 @@ $(DEV)/%.obj: msdos/%.c $(P16_HEADERS) $(TOOLS_ENV) Makefile
 rt: $(RT)/PERL.EXE
 
 # The runtime build's tests: the same smoke and installation tests, in
-# their own work directories.
+# their own work directories, with the cases tests/rt-slow.txt lists
+# allowed to time out, and EXECLTST.EXE.
 test-rt: $(RT)/PERL.EXE $(TEST_TOOLS) $(RT)/EXECLTST.EXE
-	WORK=build/run-dos-rt perl tests/run-dos $(RT)/PERL.EXE tests/smoke
+	WORK=build/run-dos-rt SLOW=tests/rt-slow.txt perl tests/run-dos \
+	  $(RT)/PERL.EXE tests/smoke
 	WORK=build/run-install-rt perl tests/run-install $(RT)/PERL.EXE \
 	  $(TEST_TOOLS) $(RT)/EXECLTST.EXE
 
