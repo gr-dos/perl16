@@ -112,7 +112,14 @@ RT_AFLAGS   = $(DEV_AFLAGS) -dP16_RT
 RT_OBJS     = $(RT)/stk16.obj $(PERL_NAMES:%=$(RT)/%.obj) \
               $(PORT_NAMES:%=$(RT)/%.obj) $(P16_NAMES:%=$(RT)/%.obj) \
               $(RT_NAMES:%=$(RT)/%.obj) $(RT)/p16init.obj
-RT_LDOPTS   = option quiet, nodefaultlibs, stack=$(STACK)
+# The stack (#17, docs/M3-RUNTIME-AUDIT.md, section 11.7): libc16's heap
+# is outside DGROUP, so the stack takes what static data leave of it,
+# but RT_DGROUP_MIN_FREE, so that more static data fails the link
+# rather than overflowing DGROUP. STK16_MARGIN is the development
+# build's 2 KB.
+RT_STACK    ?= 53k
+RT_DGROUP_MIN_FREE ?= 128
+RT_LDOPTS   = option quiet, nodefaultlibs, stack=$(RT_STACK)
 RT_SYMS     = $(RT)/libc16.lst $(RT)/libk16.lst
 # Compile one module of the runtime build: wcc's output goes to the
 # module's .err file, shown only if the compile fails, and that file is
@@ -219,13 +226,16 @@ $(RT)/execltst.obj: tests/tools/execltst.c $(P16_HEADERS) $(RT_SYMS) \
 	@echo "$(CC) $(RT_CFLAGS) -fo=$@ $<"
 	@$(RT_COMPILE)
 
-# No check-dgroup: libc16's large-model heap grows the program's memory
-# block above the stack, outside DGROUP, so DGROUP_MIN_FREE (Open
-# Watcom's near heap for children) doesn't apply. #17 sizes the stack.
-$(RT)/PERL.EXE: $(RT_OBJS) $(LIBC16L) $(LIBK16L) $(TOOLS_ENV) Makefile
+# check-dgroup with RT_DGROUP_MIN_FREE, not DGROUP_MIN_FREE: libc16's
+# large-model heap grows the program's memory block above the stack,
+# outside DGROUP, and a child needs none of DGROUP (Open Watcom's spawn
+# needed near heap).
+$(RT)/PERL.EXE: $(RT_OBJS) $(LIBC16L) $(LIBK16L) $(TOOLS_ENV) \
+  scripts/check-dgroup Makefile
 	$(WATCOM_ENV) && wlink $(RT_LDOPTS), map=$(RT)/perl.map \
 	  format dos name $@.tmp $(RT_OBJS:%=file %) \
 	  library $(LIBK16L) library $(LIBC16L)
+	perl scripts/check-dgroup $(RT)/perl.map $(RT_DGROUP_MIN_FREE)
 	mv $@.tmp $@
 
 # The libraries' symbols, for scripts/check-w131.
