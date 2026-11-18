@@ -1,0 +1,81 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Graham Ollis <plicease@cpan.org>
+Date: Wed, 18 Nov 2026 12:30:00 -0700
+Subject: [PATCH] do_sprintf(): snprintf into buf
+
+do_sprintf() formats each conversion with sprintf() into the global
+1,024-byte buf, so a width or precision in the user's format
+(sprintf("%2000d", 7)) overran it: the development build hung and the
+runtime build corrupted its data. Each conversion is now formatted with
+snprintf(), so it is cut to 1,023 bytes. A %s conversion with flags
+copies its format into tokenbuf+64, 192 bytes; a longer one is now
+treated as a plain %s. tests/smoke/sprintf.pl checks both (#16).
+---
+ doarg.c | 18 ++++++++++--------
+ 1 file changed, 10 insertions(+), 8 deletions(-)
+
+diff --git a/doarg.c b/doarg.c
+--- a/doarg.c
++++ b/doarg.c
+@@ -814,7 +814,7 @@
+ 	    default:
+ 		ch = *(++t);
+ 		*t = '\0';
+-		(void)sprintf(xs,f);
++		(void)snprintf(xs,sizeof buf,f);
+ 		len++;
+ 		xlen = strlen(xs);
+ 		break;
+@@ -835,7 +835,7 @@
+ 		    xlen = 1;
+ 		}
+ 		else {
+-		    (void)sprintf(xs,f,xlen);
++		    (void)snprintf(xs,sizeof buf,f,xlen);
+ 		    xlen = strlen(xs);
+ 		}
+ 		break;
+@@ -846,9 +846,9 @@
+ 		ch = *(++t);
+ 		*t = '\0';
+ 		if (dolong)
+-		    (void)sprintf(xs,f,(long)str_gnum(*(sarg++)));
++		    (void)snprintf(xs,sizeof buf,f,(long)str_gnum(*(sarg++)));
+ 		else
+-		    (void)sprintf(xs,f,(int)str_gnum(*(sarg++)));
++		    (void)snprintf(xs,sizeof buf,f,(int)str_gnum(*(sarg++)));
+ 		xlen = strlen(xs);
+ 		break;
+ 	    case 'X': case 'O':
+@@ -859,15 +859,15 @@
+ 		*t = '\0';
+ 		value = str_gnum(*(sarg++));
+ 		if (dolong)
+-		    (void)sprintf(xs,f,U_L(value));
++		    (void)snprintf(xs,sizeof buf,f,U_L(value));
+ 		else
+-		    (void)sprintf(xs,f,U_I(value));
++		    (void)snprintf(xs,sizeof buf,f,U_I(value));
+ 		xlen = strlen(xs);
+ 		break;
+ 	    case 'E': case 'e': case 'f': case 'G': case 'g':
+ 		ch = *(++t);
+ 		*t = '\0';
+-		(void)sprintf(xs,f,str_gnum(*(sarg++)));
++		(void)snprintf(xs,sizeof buf,f,str_gnum(*(sarg++)));
+ 		xlen = strlen(xs);
+ 		break;
+ 	    case 's':
+@@ -890,9 +890,11 @@
+ 		if (strEQ(f,"%s")) {	/* some printfs fail on >128 chars */
+ 		    break;		/* so handle simple case */
+ 		}
++		if (t - f >= sizeof tokenbuf - 64)
++		    break;		/* too long to copy: as %s */
+ 		strcpy(tokenbuf+64,f);	/* sprintf($s,...$s...) */
+ 		*t = ch;
+-		(void)sprintf(buf,tokenbuf+64,xs);
++		(void)snprintf(buf,sizeof buf,tokenbuf+64,xs);
+ 		xs = buf;
+ 		xlen = strlen(xs);
+ 		break;

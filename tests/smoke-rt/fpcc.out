@@ -1,0 +1,7 @@
+compiler: x!=0.0 !x x<0.0 x>0.0 x>1 x>=1 | p16fp: x!=ZERO x<ZERO p16_gt(x,ZERO) p16_gt(x,1) p16_ge(x,1) isnan
++0        FTFFFF FFFFFF
+-0        TFTFFF FFFFFF
+subnormal FTFFFF TFTFFF
+nan       TFFTTT TFFFFT
+1         TFFTFT TFTFTF
+status 0

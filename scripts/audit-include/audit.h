@@ -21,3 +21,11 @@ extern void *__audit_stdprn;
 #ifndef P16_CB
 #define P16_CB __cdecl
 #endif
+
+/* msdos/p16fp.h's numeric tests (#16), as the development build has
+ * them: the audit compiles the sources, and doesn't link p16fp.c. */
+#ifndef P16_ZERO
+#define P16_ZERO 0.0
+#define p16_gt(a, b) ((a) > (b))
+#define p16_ge(a, b) ((a) >= (b))
+#endif

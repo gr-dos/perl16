@@ -96,6 +96,10 @@ try the next directory.
   A hash's table stops growing at 8,192 buckets. More keys still work,
   just more slowly. Memory usually runs out first.
 - **Lines.** `<FH>` reads lines of any length, and keeps NUL bytes.
+- **`sprintf` conversions.** Each conversion is cut to 1,023 bytes:
+  `sprintf("%2000d", 7)` gives 1,023 characters, all spaces. A plain
+  `%s` is not cut. A `%s` whose flags and width take 190 characters or
+  more is treated as a plain `%s`.
 - **File names.** DOS 8.3 names. `/` and `\` both work as separators
   in file names Perl passes to DOS. In a string, `\` needs escaping as
   usual (`"C:\\DIR"`).
@@ -187,3 +191,9 @@ nonzero exit without one.
 - In this build, temporary files for piped opens go where Open Watcom's
   `tempnam()` puts them (`TMP`, else the root directory), not where
   `-e`'s do.
+- In this build, comparisons with a NaN (`9**9**9 - 9**9**9`) or an
+  infinity can be wrong: Open Watcom's floating-point emulator makes a
+  NaN equal to every number, and `0 == 9**9**9` true. The runtime build
+  (`make rt`, M3.4) compares them as Perl 3 does on an IEEE machine,
+  and treats `-0.0` and the smallest numbers (below about `1e-308`)
+  correctly too (docs/M3-RUNTIME-AUDIT.md, section 11.7).

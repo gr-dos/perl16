@@ -813,7 +813,8 @@ What this means for perl16:
   first places to look. M3.4 rewrites any that matter with
   libkitchen16's tested idioms: a zero that isn't a literal, and an
   explicit NaN test. It adds Perl tests for `<`, `>`, `<=>` and
-  truth with a NaN, `-0.0` and a subnormal.
+  truth with a NaN, `-0.0` and a subnormal. Done in M3.4 (section
+  11.7, "#16's remaining items"; patch 0012).
 - **`fpfmt` not run yet.** perl16's `fpfmt` smoke test has not been run
   against libkitchen16, because perl16 has not migrated. It is #15's
   remaining acceptance test.
@@ -1054,6 +1055,116 @@ exits with `P16EXIT`:
 - `scripts/bench ALLOC=1` gives 0.14's figures to the tenth of a
   second, so the heap fix is intact.
 
+**#16's remaining items.**
+- **`-wx`.** The runtime build compiles with every warning. Each
+  module's go to `build/rt/NAME.err`, and `scripts/check-w131` fails
+  the compile, removing the object, when W131 ("No prototype found")
+  names a `__cdecl` public symbol of `LIBC16L.LIB` or `LIBK16L.LIB`
+  (from `wlib -l` listings). Such a call would use Open Watcom's
+  register convention. There are none: the build's 157 W131s are all
+  Perl's own K&R functions.
+- **`RANDBITS`.** `msdos/config.h` said 31, but both runtimes' `rand()`
+  gives 15 bits (`RAND_MAX` 32767). `tests/smoke/rand.pl`, run against
+  both builds before the change, confirmed the defect: the largest
+  `rand(1000)` was 0.0151, and `int(rand(10))` was always 0. Patch 0010
+  sets it to 15.
+- **`do_sprintf`.** Each conversion was formatted by `sprintf` into the
+  1,024-byte `buf`. `sprintf("%2000d", 7)` hung the development build
+  and corrupted the runtime build's data (`tests/smoke/sprintf.pl`).
+  Patch 0011 uses `snprintf`, so a conversion is cut to 1,023 bytes in
+  both builds (`docs/DOS.md`, "Limits"). A `%s` format too long for
+  `tokenbuf + 64` is now treated as a plain `%s`.
+- **Comparisons `wcc -fpc` gets wrong** (section 11.5). The cases that
+  matter:
+  - `str_true`;
+  - `<=>`;
+  - `>` and `>=` in `eval.c`, in constant folding (`consarg.c`), and in
+    `cmd.c`'s test of a variable against a constant;
+  - the division-by-zero checks;
+  - `rand`'s zero argument;
+  - `print` with `$#`.
+
+  `str_true` and `<=>` meet both limits. In the runtime build these
+  now use `msdos/p16fp.h` (patch 0012). `P16_ZERO` is a `volatile`
+  zero the compiler can't see, so it calls `__FDC`. `p16_gt` and
+  `p16_ge` test for a NaN by its bits first. In the development build
+  they are `0.0`, `>` and `>=`, and its `PERL.EXE` is the same byte
+  for byte. Other comparisons with `0.0` were left as they are:
+  - `int` (`eval.c`, `consarg.c`) and `U_L` (`util.c`) take the same
+    result either way, whatever they get;
+  - `select`'s timeout (`doio.c`), `unpack`'s checksum (`dolist.c`),
+    `$|` (`stab.c`), and the debugger's flags (`cmd.c`) are harmless
+    with `-0.0` or a subnormal.
+
+  Tests at two layers, both in `tests/smoke-rt`:
+  - `fpcmp.pl`, the Perl level. It covers `+0`, `-0`, `1e-320` (high
+    16 bits clear), `-1e-320`, `2.5e-309`, `0.5`, `-0.5`, the
+    infinities and a NaN (`inf - inf`). For each, the truth tests
+    (`?:`, `!`, `&&`, `||`, `if`, `unless`, `while`); the six
+    comparisons with 0 both ways round, as expressions and as statement
+    conditions (`cmd.c`'s fast path); and `<=>`. Then a NaN against 1,
+    -1, both zeros, `inf` and a NaN; folded constants; and division by
+    `-0` and by `1e-320`.
+  - `fpcc.pl`, the C level. It runs `FPCTST.EXE`
+    (`tests/tools/fpctst.c`, compiled like the runtime build), which
+    prints the compiler's own comparisons of `-0.0`, the smallest
+    subnormal and a NaN beside `p16fp.h`'s. The first block records
+    the compiler's limits, so a compiler change shows; the second must
+    be right.
+
+  Before patch 0012 the runtime build got these wrong:
+
+  | Perl | Before | After (Perl 3 on an IEEE machine) |
+  |---|---|---|
+  | `if (-0.0)`, `!-0.0` | true, false | false, true |
+  | `if (1e-320)` | false | true |
+  | `1e-320 <=> 0` | `1e-320` | 1 |
+  | `$nan > $x`, `$nan >= $x`, `$x > $nan` (every `$x`) | true | false |
+  | `$nan <=> $x` | 1 (or -1 by the NaN's sign) | a NaN |
+  | `1 / -0.0` | no error (`-inf`) | "Illegal division by zero" |
+  | `1 / 1e-320`, folded or not | "Illegal division by (constant) zero" | `1e320` (infinity) |
+
+  `-0.0 <=> 0` gives `-0`, which is the subtraction's result, as Perl 3
+  gives it on Unix.
+
+  The development build (M2) is no reference for these. Its Open
+  Watcom x87 emulator gets them wrong too, in other ways: `$nan == $x`
+  is true for every `$x`, `$nan == 0`, `$nan > 0` and `0 > $nan` are
+  all true, `0 == inf` is true and `0 < inf` false. With `inf` it did
+  not finish `fpcmp.pl` in 60 s. Its `-0.0` and subnormals are right.
+  So `fpcmp.pl` runs under `make test-rt` only, and `docs/DOS.md` lists
+  the development build's NaN and infinity comparisons as a known
+  problem.
+- **`t/` under the runtime build.** `make test-t-rt` (CI's `runtime`
+  job) runs the whole supported suite against the M2 baseline
+  (`tests/t-baseline.txt`). The per-script results are the
+  development build's, line for line, but for one: `op.magic`
+  passes 2 of 5 rather than 1. Its test 2 expects `$!` to be 2
+  (`ENOENT`) after opening a missing file, which libc16 gives and
+  Open Watcom's runtime doesn't. The 19 failing scripts are M2's,
+  for M2's reasons (`docs/M1-REPORT.md`, section 3): `fork`, pipes to
+  processes, signals, Unix shell commands and the like.
+- **Cost.** `scripts/bench` at its default 315 cycles per millisecond
+  (an IBM PC), runtime build before and after:
+
+  | seconds | startup | arith | string | regex | hash | subs | read | bigint |
+  |---|---|---|---|---|---|---|---|---|
+  | before (0.15, main) | 0.4 | 39.5 | 12.0 | 12.0 | 23.1 | 17.9 | 18.7 | 192.1 |
+  | after | 0.4 | 40.4 | 12.1 | 12.0 | 23.2 | 18.3 | 18.9 | 194.5 |
+
+  `arith` is 2% slower, from the helper call in each truth test and
+  comparison with zero; the rest are within 1%.
+
+**Tests, 2026-11-18, #16's remaining items.**
+- `make test`: 23 passed (`rand` and `sprintf` new), `fpfmt` todo; 35
+  of 35 install cases.
+- `make test-rt`: 24 of 24 smoke, 4 of 4 `smoke-rt` (`fpcmp` and
+  `fpcc` new), 36 of 36 install.
+- `make test-t` and `make test-t-rt`: 53 of 72, the baseline.
+- `make audit`: all 25 sources compile (`audit.h` gives `P16_ZERO`,
+  `p16_gt` and `p16_ge` as the development build has them). The one
+  new external is `do_sprintf`'s `snprintf`, from libkitchen16.
+
 
 ## 12. Issue breakdown
 
@@ -1067,7 +1178,7 @@ below, and its detail is the section of this document it cites.
 | [gr-dos/libc16#21](https://github.com/gr-dos/libc16/issues/21) | signal and raise (C89 7.7), SIGINT through INT 23h | sections 6.6, 7.4 | M3.2 | done in [libc16#26](https://github.com/gr-dos/libc16/pull/26), 0.11 |
 | [gr-dos/libc16#22](https://github.com/gr-dos/libc16/issues/22) | small C89 and Microsoft C functions for perl16 | sections 6.2–6.7: `atexit`; `time`, `gmtime`; `rand`, `srand`; `isatty`, `dup`, `dup2`, `fdopen`, `rmdir`, `strupr` | M3.2 | done in [libc16#23](https://github.com/gr-dos/libc16/pull/23), 0.08 |
 | [#15](https://github.com/gr-dos/perl16/issues/15) | M3.3: create gr-dos/libkitchen16 | section 11: `fpc`, `fmt`, `fmtio`, `conv`, `math` | M3.3 | implemented in [libkitchen16#1](https://github.com/gr-dos/libkitchen16/pull/1), released in 0.01 (now 0.02); `fpfmt` passes in the runtime build, which `make test-rt` requires: done |
-| [#16](https://github.com/gr-dos/perl16/issues/16) | M3.4: perl16 sources against libc16's headers | section 5.3, 7.9, 7.10: declarations and includes, `__cdecl` callbacks, `<stdarg.h>`, `stdaux`/`stdprn`, `_hdopen`, `RANDBITS` | M3.4 | open |
+| [#16](https://github.com/gr-dos/perl16/issues/16) | M3.4: perl16 sources against libc16's headers | section 5.3, 7.9, 7.10: declarations and includes, `__cdecl` callbacks, `<stdarg.h>`, `stdaux`/`stdprn`, `_hdopen`, `RANDBITS` | M3.4 | done: the runtime build (section 11.7), with `-wx`, `RANDBITS`, `snprintf`, the `-fpc` comparisons and `t/` under it last |
 | [#17](https://github.com/gr-dos/perl16/issues/17) | M3.4: perl16's DOS shims for libc16 | sections 6.2–6.6, 7.1, 7.5–7.7, 10: `environ`, `exec` emulation, the piped-open temporary file, `stk16.asm` on `_end`, the INT 24h handler, the ctype and stream-buffering measurements | M3.4 | open |
 
 The libkitchen16 issue was opened in perl16 because the repository did
