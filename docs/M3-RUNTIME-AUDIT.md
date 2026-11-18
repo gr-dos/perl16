@@ -742,25 +742,105 @@ perl16 links from libkitchen16 (helpers, `fmt`, `fmtio`, `conv`, the
 eight math functions). libc16's members Perl calls add a few KB. That
 is well under the 65 KB of Open Watcom runtime they replace.
 
+### 11.5 Status
+
+As of 2026-11-18, `gr-dos/libkitchen16` exists. Its first
+implementation is merged
+([libkitchen16#1](https://github.com/gr-dos/libkitchen16/pull/1),
+`d36fac5`) and released as
+[0.01](https://github.com/gr-dos/libkitchen16/releases/tag/v0.01). Measured
+sizes, speed and a no-coprocessor test followed
+([libkitchen16#6](https://github.com/gr-dos/libkitchen16/pull/6)), and the
+current release is
+[0.02](https://github.com/gr-dos/libkitchen16/releases/tag/v0.02). It
+follows sections 11.2 and 11.3:
+
+- **Modules.** `fpc` (the 17 helpers of section 11.2, in the small,
+  compact and large models), `fmt`, `fmtio`, `conv` and `math` (all of
+  C89 7.5). The libraries are `LIBK16.LIB`, `LIBK16C.LIB` and
+  `LIBK16L.LIB`, one member per function, 8086 instructions only. The
+  pin script is `consumers/fetch-libkitchen16`.
+- **Accuracy.** `%e %f %g` are exactly rounded at any precision, and
+  `strtod` and `sqrt` are correctly rounded. The other `math` functions
+  are within 4 ulps, and `pow` is exact for integer exponents.
+- **Provenance.** Each module's spec and tests came first. A separate
+  session wrote each module's code without `src/` or history. Its
+  similarity audit puts no member over 0.50; the highest is 0.38. The
+  maintainer reviewed the provenance on 2026-11-18.
+- **Tests.** `make test` passes 213 checks in each model. The checks
+  include DOSBox-X `cputype=8086` runs against host-oracle corpora and
+  measured stack depths: `snprintf` uses at most 530 bytes and `pow` at
+  most 396.
+
+What this means for perl16:
+
+- **Release 0.02** (0.01 was the first). The pin is `version=0.02`,
+  `sha256=2ca356b7d2a23442b7851b10c09cfa577ee3888eaf5b4b899f10ee494162cb85`
+  (`libkitchen16-0.02.zip.sha256`). It was built against libc16 0.07.
+  perl16 will pin libc16 0.12, so M3.4 must check that the two work
+  together: libkitchen16 uses libc16's `errno` and `FILE` output.
+- **Larger than budgeted.** libkitchen16's `make size`
+  ([libkitchen16#6](https://github.com/gr-dos/libkitchen16/pull/6))
+  links perl16's set of functions in the large model. That is the
+  helpers, `sprintf`, `vsprintf`, `fprintf`, `atof`, and `atan2 cos exp
+  log modf pow sin sqrt`. They add 30,760 bytes of image and 2,000
+  bytes of DGROUP, about twice section 11.4's 9–14 KB estimate. `pow`
+  alone is 12 KB. That is still under the 65 KB of Open Watcom runtime
+  it replaces. The 2,000 bytes of DGROUP count against perl16's
+  DGROUP margin, so M3.4 measures both from `PERL.EXE`'s map.
+- **Speed.** Its `make bench` uses the same emulated 4.77 MHz 8088 as
+  perl16's `scripts/bench`. An addition takes about 1.1 ms, a
+  division 4.9 ms, `sprintf("%.20g")` (every number Perl prints)
+  27 ms, `atof` 35 ms, `sin` 72 ms and `pow` 0.4 s, in the large model.
+  M3.4 compares perl16's workloads against M2's Open Watcom
+  emulator, and reports slowdowns to libkitchen16.
+- **Comparisons the compiler gets wrong.**
+  [libkitchen16#2](https://github.com/gr-dos/libkitchen16/issues/2),
+  closed in 0.02, found two limits in the code `wcc -fpc` generates. The
+  helpers can't fix them. They're described in libkitchen16's
+  `docs/CONSUMERS.md`, "Migration notes", and `docs/spec/fpc.md`:
+  - **NaN.** `x > y` and `x >= y` are true when either is a NaN. Perl 3
+    can make one, for example `9**9**9 - 9**9**9`.
+  - **A literal zero.** `x == 0.0`, `x != 0.0`, `x < 0.0`, `!x`,
+    `if (x)`, `x && y` and `x ? a : b` test only the high 16 bits of
+    `x`. So `-0.0` is non-zero, and a subnormal below about `1.4e-309`
+    is zero.
+
+  Perl 3's truth test of a number and its comparisons with `0.0` are the
+  first places to look. M3.4 rewrites any that matter with
+  libkitchen16's tested idioms: a zero that isn't a literal, and an
+  explicit NaN test. It adds Perl tests for `<`, `>`, `<=>` and
+  truth with a NaN, `-0.0` and a subnormal.
+- **`fpfmt` not run yet.** perl16's `fpfmt` smoke test has not been run
+  against libkitchen16, because perl16 has not migrated. It is #15's
+  remaining acceptance test.
+
 ## 12. Issue breakdown
 
-These issues are drafted with this audit and are still to be opened.
-Each one's scope is the row below, and its detail is the section of
-this document it cites. When they are opened, this table gets their
-links.
+These issues were opened from this audit. Each one's scope is the row
+below, and its detail is the section of this document it cites.
 
-| Repository | Title | Scope | Phase |
-|---|---|---|---|
-| gr-dos/libc16 | setjmp and longjmp (C89 7.6) | sections 6.3, 7.3 | M3.2 |
-| gr-dos/libc16 | system, the spawn family and getpid | section 6.6: `system`, `spawnv`, `spawnve`, `spawnvp`, `spawnvpe`, `spawnl` (`P_WAIT`), `getpid` | M3.2 |
-| gr-dos/libc16 | signal and raise (C89 7.7), SIGINT through INT 23h | sections 6.6, 7.4 | M3.2 |
-| gr-dos/libc16 | small C89 and Microsoft C functions for perl16 | sections 6.2–6.7: `atexit`; `time`, `gmtime`; `rand`, `srand`; `isatty`, `dup`, `dup2`, `fdopen`, `rmdir`, `strupr` | M3.2 |
-| gr-dos/perl16 | M3.3: create gr-dos/libkitchen16 | section 11: `fpc`, `fmt`, `fmtio`, `conv`, `math` | M3.3 |
-| gr-dos/perl16 | M3.4: perl16 sources against libc16's headers | section 5.3, 7.9, 7.10: declarations and includes, `__cdecl` callbacks, `<stdarg.h>`, `stdaux`/`stdprn`, `_hdopen`, `RANDBITS` | M3.4 |
-| gr-dos/perl16 | M3.4: perl16's DOS shims for libc16 | sections 6.2–6.6, 7.1, 7.5–7.7, 10: `environ`, `exec` emulation, the piped-open temporary file, `stk16.asm` on `_end`, the INT 24h handler, the ctype and stream-buffering measurements | M3.4 |
+| Issue | Title | Scope | Phase | Status |
+|---|---|---|---|---|
+| [gr-dos/libc16#19](https://github.com/gr-dos/libc16/issues/19) | setjmp and longjmp (C89 7.6) | sections 6.3, 7.3 | M3.2 | done in [libc16#24](https://github.com/gr-dos/libc16/pull/24), 0.09 |
+| [gr-dos/libc16#20](https://github.com/gr-dos/libc16/issues/20) | system, the spawn family and getpid | section 6.6: `system`, `spawnv`, `spawnve`, `spawnvp`, `spawnvpe`, `spawnl` (`P_WAIT`), `getpid` | M3.2 | done in [libc16#25](https://github.com/gr-dos/libc16/pull/25), 0.10 |
+| [gr-dos/libc16#21](https://github.com/gr-dos/libc16/issues/21) | signal and raise (C89 7.7), SIGINT through INT 23h | sections 6.6, 7.4 | M3.2 | done in [libc16#26](https://github.com/gr-dos/libc16/pull/26), 0.11 |
+| [gr-dos/libc16#22](https://github.com/gr-dos/libc16/issues/22) | small C89 and Microsoft C functions for perl16 | sections 6.2–6.7: `atexit`; `time`, `gmtime`; `rand`, `srand`; `isatty`, `dup`, `dup2`, `fdopen`, `rmdir`, `strupr` | M3.2 | done in [libc16#23](https://github.com/gr-dos/libc16/pull/23), 0.08 |
+| [#15](https://github.com/gr-dos/perl16/issues/15) | M3.3: create gr-dos/libkitchen16 | section 11: `fpc`, `fmt`, `fmtio`, `conv`, `math` | M3.3 | implemented in [libkitchen16#1](https://github.com/gr-dos/libkitchen16/pull/1), released in 0.01 (now 0.02); `fpfmt` still to run |
+| [#16](https://github.com/gr-dos/perl16/issues/16) | M3.4: perl16 sources against libc16's headers | section 5.3, 7.9, 7.10: declarations and includes, `__cdecl` callbacks, `<stdarg.h>`, `stdaux`/`stdprn`, `_hdopen`, `RANDBITS` | M3.4 | open |
+| [#17](https://github.com/gr-dos/perl16/issues/17) | M3.4: perl16's DOS shims for libc16 | sections 6.2–6.6, 7.1, 7.5–7.7, 10: `environ`, `exec` emulation, the piped-open temporary file, `stk16.asm` on `_end`, the INT 24h handler, the ctype and stream-buffering measurements | M3.4 | open |
 
-The libkitchen16 issue lives in perl16 until the repository exists.
-M3.3 creates it, with its own issues.
+The libkitchen16 issue was opened in perl16 because the repository did
+not exist yet. M3.3 has since created it (section 11.5), and its own
+issues are filed there.
+
+All four libc16 issues are released, and libc16 0.12 (2026-11-18) has every
+one of them. 0.12 also reserves code offset 0 in the small and compact
+models so that no function pointer is null
+([libc16#27](https://github.com/gr-dos/libc16/issues/27)); perl16 is
+large-model and unaffected. M3.4 pins 0.12
+([#16](https://github.com/gr-dos/perl16/issues/16)) and runs `make audit`
+again; the counts in sections 4 to 6 are against 0.07.
 
 ## 13. Reproducing
 
