@@ -96,6 +96,10 @@ try the next directory.
   A hash's table stops growing at 8,192 buckets. More keys still work,
   just more slowly. Memory usually runs out first.
 - **Lines.** `<FH>` reads lines of any length, and keeps NUL bytes.
+- **`sprintf` conversions.** Each conversion is cut to 1,023 bytes:
+  `sprintf("%2000d", 7)` gives 1,023 characters, all spaces. A plain
+  `%s` is not cut. A `%s` whose flags and width take 190 characters or
+  more is treated as a plain `%s`.
 - **File names.** DOS 8.3 names. `/` and `\` both work as separators
   in file names Perl passes to DOS. In a string, `\` needs escaping as
   usual (`"C:\\DIR"`).
