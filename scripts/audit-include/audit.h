@@ -16,3 +16,8 @@ extern void *__audit_stdaux;
 extern void *__audit_stdprn;
 #define stdaux ((void *)__audit_stdaux)
 #define stdprn ((void *)__audit_stdprn)
+/* The library-callback convention msdos/p16rt.h gives the runtime build
+ * (#16), which this audit doesn't force-include. */
+#ifndef P16_CB
+#define P16_CB __cdecl
+#endif

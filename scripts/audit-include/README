@@ -7,9 +7,10 @@ PERL.EXE, and they are not a design for the eventual headers: each one
 declares only what the Perl 3.044 sources and perl16's own files use.
 
 audit.h is force-included (wcc -fi) and supplies the few macros that
-libc16's headers lack (errno values, stdaux/stdprn). varargs.h stands in
-for the pre-ANSI <varargs.h> that util.c uses; M3.4 moves it to
-<stdarg.h> (#16).
+libc16's headers lack (errno values, stdaux/stdprn), and P16_CB, the
+callback convention msdos/p16rt.h gives the runtime build (#16).
+varargs.h stands in for the pre-ANSI <varargs.h> that util.c uses; M3.4
+moves it to <stdarg.h> (#16).
 
 setjmp.h, signal.h, process.h and math.h stood in for headers that libc16
 0.12 and libkitchen16 0.02 now provide, and were removed when perl16

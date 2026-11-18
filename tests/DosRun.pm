@@ -74,11 +74,18 @@ sub run_batch ($work, $lines, $timeout, $log) {
     close $b;
     local $ENV{SDL_VIDEODRIVER} = 'dummy';
     local $ENV{SDL_AUDIODRIVER} = 'dummy';
+    my $start = time;
     my $rc = system('sh', '-c', 'exec "$@" >"$0" 2>&1', $log,
         'timeout', '-s', 'KILL', $timeout,
         $ENV{DOSBOX} // 'dosbox-x', '-nogui', '-nomenu',
         '-conf', "$work/DOSBOX.CNF");
-    return $rc >> 8 == 137;
+    # How timeout reports a kill differs between coreutils versions:
+    # status 124, 137, or timeout itself killed by the KILL it sent its
+    # process group. So the clock decides, with the statuses as well.
+    return 1 if time - $start >= $timeout;
+    return 1 if ($rc & 127) == 9;
+    my $st = $rc >> 8;
+    return $st == 124 || $st == 137;
 }
 
 sub dos_files ($work) {

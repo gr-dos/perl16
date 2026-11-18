@@ -27,6 +27,7 @@ is turned into LF. Comment lines at the top of the script can say:
 
   # status: N        the expected exit status (default 0)
   # command: ARGS    run PERL ARGS instead of PERL NAME.PL
+  # setup: LINE      a batch line run before PERL (any number of them)
   # todo: REASON     a known failure: reported, but not counted as one
 
 Any other file in DIR is a fixture, copied into the work directory
@@ -42,9 +43,17 @@ takes longer than DOSBOX_TIMEOUT seconds. Its output and the result of
 its exit-status check are collected afterwards. Exits 0 if every case
 not marked todo passes.
 
+A build can have slow cases of its own. SLOW names a file of them, one
+per line as C<NAME REASON> (blank lines and C<#> comments ignored). A
+listed case that times out is reported as slow and not counted as a
+failure; one that fails in any other way (the wrong output or exit
+status) is a failure as usual, and one that passes is reported, so the
+entry can be removed. A name that isn't a case is an error.
+
 Environment: DOSBOX (default dosbox-x), DOSBOX_TIMEOUT seconds per case
 (default 60), WORK (default build/run-dos) the work directory, KEEP=1 to
-keep it.
+keep it, SLOW the file of slow cases, FILES more fixtures (paths
+separated by spaces, such as built test tools), copied like the others.
 
 =cut
 
@@ -65,12 +74,13 @@ for my $dir (@dirs) {
         die "$pl: name longer than 8 characters\n" if length $name > 8;
         die "$pl: $name is used twice\n" if $seen{$name}++;
         my %case = (name => $name, file => $pl, status => 0,
-                    command => "PERL $name.PL");
+                    command => "PERL $name.PL", setup => []);
         for (split /\n/, slurp($pl)) {
             last unless /^#/;
             $case{status}  = $1 if /^#\s*status:\s*(\d+)/;
             $case{command} = "PERL $1" if /^#\s*command:\s*(.+?)\s*$/;
             $case{todo}    = $1 if /^#\s*todo:\s*(.+?)\s*$/;
+            push @{ $case{setup} }, $1 if /^#\s*setup:\s*(.+?)\s*$/;
         }
         (my $exp = $pl) =~ s/\.pl$/.out/;
         die "$pl: no $exp\n" unless -f $exp;
@@ -80,6 +90,17 @@ for my $dir (@dirs) {
     }
 }
 die "no cases\n" unless @cases;
+
+if (my $slow = $ENV{SLOW}) {
+    my %case = map { $_->{name} => $_ } @cases;
+    for (split /\n/, slurp($slow)) {
+        next if /^\s*(#|$)/;
+        my ($name, $why) = /^(\S+)\s+(.+?)\s*$/
+            or die "$slow: not NAME REASON: $_\n";
+        my $c = $case{uc $name} or die "$slow: $name is not a case\n";
+        $c->{slow} = $why;
+    }
+}
 
 # Any other file in a case directory is a fixture, copied as it is under
 # its name in upper case.
@@ -91,6 +112,12 @@ for my $dir (@dirs) {
     }
 }
 
+for my $f (split ' ', $ENV{FILES} // '') {
+    my $name = uc basename($f);
+    die "$f: $name is used twice\n" if $seen{$name}++;
+    copy($f, "$work/$name") or die "copy $f: $!\n";
+}
+
 # Each case runs in its own DOSBox-X session, so one that hangs is
 # killed after DOSBOX_TIMEOUT seconds without stopping the others. Its
 # exit status N passes when errorlevel >= N and not >= N + 1.
@@ -98,7 +125,7 @@ write_config($work);
 
 for my $c (@cases) {
     my ($n, $st) = @$c{qw(name status)};
-    my @bat = ('@echo off', "$c->{command} >$n.OUT");
+    my @bat = ('@echo off', @{ $c->{setup} }, "$c->{command} >$n.OUT");
     push @bat, sprintf 'if errorlevel %d goto f', $st + 1 if $st < 255;
     push @bat, "if not errorlevel $st goto f";
     push @bat, "echo ok >$n.RC", 'goto d', ':f', "echo bad >$n.RC", ':d';
@@ -106,7 +133,7 @@ for my $c (@cases) {
 }
 my %dosfile = dos_files($work);
 
-my ($pass, $fail, $todo) = (0, 0, 0);
+my ($pass, $fail, $todo, $slow) = (0, 0, 0, 0);
 for my $c (@cases) {
     my $n = $c->{name};
     my @why;
@@ -129,7 +156,13 @@ for my $c (@cases) {
         if ($c->{todo}) {
             say "$n: passes, but is marked todo ($c->{todo})";
         }
+        if ($c->{slow}) {
+            say "$n: passes, but is listed as slow in $ENV{SLOW} ($c->{slow})";
+        }
         $pass++;
+    } elsif ($c->{slow} && !defined $rc && $c->{timedout}) {
+        say "$n: slow: $c->{slow} (timed out after ${timeout}s)";
+        $slow++;
     } elsif ($c->{todo}) {
         say "$n: todo: $c->{todo} (" . join('; ', @why) . ')';
         $todo++;
@@ -139,8 +172,9 @@ for my $c (@cases) {
     }
 }
 
-say "run-dos: $pass passed, $fail failed, $todo todo";
+say "run-dos: $pass passed, $fail failed, $todo todo",
+    $slow ? ", $slow slow" : '';
 say "run-dos: work directory $work (output of failures in NAME.GOT)"
-    if $fail || $todo || $ENV{KEEP};
-remove_tree($work) unless $fail || $todo || $ENV{KEEP};
+    if $fail || $todo || $slow || $ENV{KEEP};
+remove_tree($work) unless $fail || $todo || $slow || $ENV{KEEP};
 exit($fail ? 1 : 0);

@@ -1,0 +1,549 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Graham Ollis <plicease@cpan.org>
+Date: Wed, 18 Nov 2026 12:00:00 -0700
+Subject: [PATCH] Compile against libc16 and libkitchen16 (M3.4)
+
+perl16's runtime build (P16_RT) compiles these sources against libc16's
+and libkitchen16's headers, force-including msdos/p16rt.h, and links
+their libraries in place of Open Watcom's runtime (perl16 #16, #17;
+docs/M3-RUNTIME-AUDIT.md, sections 5.3, 6 and 7). The development build
+keeps Open Watcom's runtime.
+
+- cmd.c, util.c: deb(), fatal() and warn() use <stdarg.h> instead of
+  <varargs.h>, which libc16 doesn't have, with the prototypes perl.h
+  already gives them; mess() takes the format as a parameter.
+- util.c: no K&R malloc() and realloc() declarations under P16_RT, where
+  <stdlib.h> declares them returning void *. setenv() passed strupr()
+  two arguments; it takes one.
+- dolist.c, stab.c, msdos/popen.c: the functions the library calls back
+  (qsort, signal, atexit) are P16_CB, which is __cdecl under P16_RT.
+- perly.c: libc16 has no stdaux or stdprn stream to close. main()
+  takes two parameters under P16_RT and env is a local: libc16's startup
+  passes two with SP at the end of the program's memory block, so
+  assigning a third parameter overwrote DOS's next memory control block.
+- msdos/msdos.c: under P16_RT, ioctl() maps a DOS error as libc16 does
+  (its docs/spec/io.md), which has no EPERM, ENFILE or EZERO, and
+  do_aspawn() and do_spawn() give children environ, since libc16's
+  spawnvp() and spawnl() pass DOS's environment rather than %ENV. The
+  shell's command goes through libc16_systeme() (libc16 0.15), which
+  passes it to COMSPEC /C byte for byte with environ. A command run
+  directly is split as libc16's startup splits a command tail, double
+  quotes and backslashes included, so that, quoted again by
+  spawnvpe(), the program sees the arguments the command names.
+- msdos/popen.c: the temporary file is created exclusively in TEMP, TMP
+  or the current directory by perl16_etemp() (msdos/etemp.c), instead of
+  named by tempnam(), which libc16 doesn't have and which only checks
+  that a name is free (docs/M2-REPORT.md, section 12).
+---
+diff --git a/cmd.c b/cmd.c
+--- a/cmd.c
++++ b/cmd.c
+@@ -59,7 +59,7 @@
+ #include "perl.h"
+ 
+ #ifdef I_VARARGS
+-#  include <varargs.h>
++#  include <stdarg.h>		/* perl16: ANSI C, for either runtime */
+ #endif
+ 
+ static STR str_chop;
+@@ -946,21 +946,19 @@
+     fprintf(stderr,pat,a1,a2,a3,a4,a5,a6,a7,a8);
+ }
+ #  else
+-/*VARARGS1*/
+-deb(va_alist)
+-va_dcl
++/* perl16: <stdarg.h> */
++int
++deb(void *pat, ...)
+ {
+     va_list args;
+-    char *pat;
+     register int i;
+ 
+-    va_start(args);
++    va_start(args, pat);
+     fprintf(stderr,"%-4ld",(long)curcmd->c_line);
+     for (i=0; i<dlevel; i++)
+ 	fprintf(stderr,"%c%c ",debname[i],debdelim[i]);
+ 
+-    pat = va_arg(args, char *);
+-    (void) vfprintf(stderr,pat,args);
++    (void) vfprintf(stderr,(char *)pat,args);
+     va_end( args );
+ }
+ #  endif
+diff --git a/dolist.c b/dolist.c
+--- a/dolist.c
++++ b/dolist.c
+@@ -1429,8 +1429,8 @@
+     register STR **up;
+     register int max = arglast[2] - sp;
+     register int i;
+-    int sortcmp();
+-    int sortsub();
++    int P16_CB sortcmp();
++    int P16_CB sortsub();
+     STR *oldfirst;
+     STR *oldsecond;
+     ARRAY *oldstack;
+@@ -1496,7 +1496,7 @@
+     return sp+max;
+ }
+ 
+-int
++int P16_CB			/* perl16: called by qsort */
+ sortsub(str1,str2)
+ STR **str1;
+ STR **str2;
+@@ -1507,6 +1507,7 @@
+     return (int)str_gnum(*stack->ary_array);
+ }
+ 
++int P16_CB			/* perl16: called by qsort */
+ sortcmp(strp1,strp2)
+ STR **strp1;
+ STR **strp2;
+diff --git a/msdos/msdos.c b/msdos/msdos.c
+--- a/msdos/msdos.c
++++ b/msdos/msdos.c
+@@ -82,7 +82,11 @@
+ 			errno = EMFILE;
+ 			break;
+ 		case 5:
++#ifdef P16_RT		/* perl16: libc16's mapping (its docs/spec/io.md) */
++			errno = EACCES;
++#else
+ 			errno = EPERM;
++#endif
+ 			break;
+ 		case 6:
+ 			errno = EBADF;
+@@ -99,10 +103,18 @@
+ 			errno = EXDEV;
+ 			break;
+ 		case 0x12:
++#ifdef P16_RT
++			errno = ENOENT;
++#else
+ 			errno = ENFILE;
++#endif
+ 			break;
+ 		default:
++#ifdef P16_RT
++			errno = EACCES;
++#else
+ 			errno = EZERO;
++#endif
+ 			break;
+ 		}
+ 		return -1;
+@@ -202,15 +214,81 @@
+ 		*a++ = "";
+ 	}
+ 	*a = Nullch;
++#ifdef P16_RT
++	/* perl16: libc16's spawnvp passes DOS's environment, not %ENV */
++	if (really && *(tmps = str_get(really)))
++	    status = spawnvpe(P_WAIT,tmps,argv,environ);
++	else
++	    status = spawnvpe(P_WAIT,argv[0],argv,environ);
++#else
+ 	if (really && *(tmps = str_get(really)))
+ 	    status = spawnvp(P_WAIT,tmps,argv);
+ 	else
+ 	    status = spawnvp(P_WAIT,argv[0],argv);
++#endif
+ 	Safefree(argv);
+     }
+     return status;
+ }
+ 
++#ifdef P16_RT
++/*
++ * perl16: split s into a, in place, as libc16's startup splits a
++ * command tail (its docs/spec/startup.md): runs of spaces and tabs
++ * separate arguments; a double quote toggles quoting and is removed;
++ * 2n backslashes and a quote give n backslashes and toggle quoting,
++ * 2n + 1 give n and a literal quote; other backslashes are literal.
++ * libc16's spawn functions quote each argument so that this gives it
++ * back, so a program run directly sees the arguments it would see if
++ * the command reached it as written, quotes and all. An argument is
++ * never longer than its text, so the copy can't overtake the reading.
++ */
++static void
++p16_split(s, a)
++register char *s;
++register char **a;
++{
++    register char *d = s;
++    int quoted, n;
++
++    for (;;) {
++	while (*s == ' ' || *s == '\t')
++	    s++;
++	if (!*s)
++	    break;
++	*a++ = d;
++	quoted = 0;
++	while (*s && (quoted || (*s != ' ' && *s != '\t'))) {
++	    if (*s == '\\') {
++		for (n = 0; *s == '\\'; n++)
++		    s++;
++		if (*s == '"') {
++		    for (; n >= 2; n -= 2)
++			*d++ = '\\';
++		    if (n) {		/* an escaped, literal quote */
++			*d++ = '"';
++			s++;
++		    }
++		}
++		else
++		    while (n-- > 0)
++			*d++ = '\\';
++	    }
++	    else if (*s == '"') {
++		quoted = !quoted;
++		s++;
++	    }
++	    else
++		*d++ = *s++;
++	}
++	if (*s)
++	    s++;
++	*d++ = '\0';
++    }
++    *a = Nullch;
++}
++#endif
++
+ int
+ do_spawn(cmd)
+ char *cmd;
+@@ -220,21 +298,38 @@
+     char **argv;
+     char flags[10];
+     int status;
+-    char *shell, *cmd2;
++    char *cmd2;
++#ifndef P16_RT
++    char *shell;
+ 
+     /* save an extra exec if possible */
+     if ((shell = getenv("COMSPEC")) == 0)
+ 	shell = "\\command.com";
++#endif
+ 
+     /* see if there are shell metacharacters in it */
+     if (strchr(cmd, '>') || strchr(cmd, '<') || strchr(cmd, '|'))
+ 	  doshell:
++#ifdef P16_RT
++	    /*
++	     * perl16: COMSPEC /C followed by the command exactly as it
++	     * is, with environ, so the shell and what it runs see %ENV
++	     * (libc16_systeme, libc16 0.15). The shell is the one COMSPEC
++	     * names in the environment DOS gave Perl; a COMSPEC set in
++	     * %ENV is passed on but doesn't choose it.
++	     */
++	    return libc16_systeme(cmd, environ);
++#else
+ 	    return spawnl(P_WAIT,shell,shell,"/c",cmd,(char*)0);
++#endif
+ 
+     New(1102,argv, strlen(cmd) / 2 + 2, char*);
+ 
+     New(1103,cmd2, strlen(cmd) + 1, char);
+     strcpy(cmd2, cmd);
++#ifdef P16_RT
++    p16_split(cmd2, argv);
++#else
+     a = argv;
+     for (s = cmd2; *s;) {
+ 	while (*s && isspace(*s)) s++;
+@@ -245,8 +340,13 @@
+ 	    *s++ = '\0';
+     }
+     *a = Nullch;
++#endif
+     if (argv[0])
++#ifdef P16_RT
++	if ((status = spawnvpe(P_WAIT,argv[0],argv,environ)) == -1) {
++#else
+ 	if ((status = spawnvp(P_WAIT,argv[0],argv)) == -1) {
++#endif
+ 	    Safefree(argv);
+ 	    Safefree(cmd2);
+ 	    goto doshell;
+diff --git a/msdos/popen.c b/msdos/popen.c
+--- a/msdos/popen.c
++++ b/msdos/popen.c
+@@ -26,6 +26,7 @@
+ #include <process.h>
+ #include <string.h>
+ #include "dosglob.h"
++#include "etemp.h"
+ 
+ /*
+  * Possible actions on an popened file
+@@ -48,7 +49,7 @@
+ 
+ 
+ /* Clean up function */
+-static void close_pipes(void);
++static void P16_CB close_pipes(void);	/* perl16: called by atexit */
+ 
+ /*
+  * Add a file f running the command command on file name to the list
+@@ -76,6 +77,7 @@
+ {
+ 	char buff[256];
+ 	char *name;
++	const char *where;
+ 	FILE *f;
+ 	static init = 0;
+ 
+@@ -85,17 +87,17 @@
+ 		else
+ 			init++;
+ 
+-	if ((name = tempnam(getenv("TMP"), "pp")) == NULL)
++	/*
++	 * perl16: the file is created, not just named, in TEMP, TMP or
++	 * the current directory (msdos/etemp.c), and f writes it.
++	 */
++	if ((f = perl16_etemp(&name, &where)) == NULL)
+ 		return NULL;
+ 
+ 	switch (*t) {
+ 	case 'r':
+ 		/* perl16: <*.c> globs without a helper (msdos/dosglob.c) */
+ 		if (strncmp(command, "perlglob ", 9) == 0) {
+-			if ((f = fopen(name, "w")) == NULL) {
+-				free(name);
+-				return NULL;
+-			}
+ 			if ((perl16_glob(command + 9, f) != 0) | (fclose(f) == EOF)
+ 			    || (f = fopen(name, "r")) == NULL) {
+ 				(void)unlink(name);
+@@ -104,7 +106,9 @@
+ 			}
+ 		} else {
+ 		sprintf(buff, "%s>%s", command, name);
+-		if (system(buff) || (f = fopen(name, "r")) == NULL) {
++		if ((fclose(f) == EOF) | (system(buff) != 0)
++		    || (f = fopen(name, "r")) == NULL) {
++			(void)unlink(name);
+ 			free(name);
+ 			return NULL;
+ 		}
+@@ -117,10 +121,6 @@
+ 		}
+ 		return f;
+ 	case 'w':
+-		if ((f = fopen(name, "w")) == NULL) {
+-			free(name);
+-			return NULL;
+-		}
+ 		if (add(f, command, name, execute)) {
+ 			(void)fclose(f);
+ 			(void)unlink(name);
+@@ -129,6 +129,8 @@
+ 		}
+ 		return f;
+ 	default:
++		(void)fclose(f);
++		(void)unlink(name);
+ 		free(name);
+ 		return NULL;
+ 	}
+@@ -183,7 +185,7 @@
+ /*
+  * Clean up at the end.  Called by the onexit handler.
+  */
+-static void
++static void P16_CB
+ close_pipes(void)
+ {
+ 	struct todo    *p;
+diff --git a/perly.c b/perly.c
+--- a/perly.c
++++ b/perly.c
+@@ -89,11 +89,25 @@
+ static bool minus_c;
+ static char patchlevel[6];
+ 
++#ifdef P16_RT
++/*
++ * perl16: libc16's startup calls main(argc, argv) with SP at the top of
++ * the stack, which is the end of the program's memory block, so a third
++ * parameter would be the DOS memory control block that follows it, and
++ * assigning env would overwrite it. env is a local here.
++ */
++main(argc,argv)
++register int argc;
++register char **argv;
++{
++    register char **env;
++#else
+ main(argc,argv,env)
+ register int argc;
+ register char **argv;
+ register char **env;
+ {
++#endif
+     register STR *str;
+     register char *s;
+     char *index(), *strcpy(), *getenv();
+@@ -127,9 +141,11 @@
+      * space.  The other alternative would be to provide STDAUX and STDPRN
+      * filehandles.
+      */
++#ifndef P16_RT		/* perl16: libc16 has no stdaux or stdprn stream */
+     (void)fclose(stdaux);
+     (void)fclose(stdprn);
+ #endif
++#endif
+     if (do_undump) {
+ 	origfilename = savestr(argv[0]);
+ 	do_undump = 0;
+diff --git a/stab.c b/stab.c
+--- a/stab.c
++++ b/stab.c
+@@ -77,7 +77,7 @@
+ #define handlertype int
+ #endif
+ 
+-static handlertype sighandler();
++static handlertype P16_CB sighandler();	/* perl16: called by signal */
+ 
+ STR *
+ stab_str(str)
+@@ -551,7 +551,7 @@
+     return 0;
+ }
+ 
+-static handlertype
++static handlertype P16_CB
+ sighandler(sig)
+ int sig;
+ {
+diff --git a/util.c b/util.c
+--- a/util.c
++++ b/util.c
+@@ -70,7 +70,7 @@
+ #endif
+ 
+ #ifdef I_VARARGS
+-#  include <varargs.h>
++#  include <stdarg.h>		/* perl16: ANSI C, for either runtime */
+ #endif
+ 
+ #define FLUSH
+@@ -97,7 +97,9 @@
+ #endif /* MSDOS */
+ {
+     char *ptr;
++#ifndef P16_RT
+     char *malloc();
++#endif
+ 
+ #ifdef MSDOS
+ 	if (size > 0xffff) {
+@@ -143,7 +145,9 @@
+ #endif /* MSDOS */
+ {
+     char *ptr;
++#ifndef P16_RT
+     char *realloc();
++#endif
+ 
+ #ifdef MSDOS
+ 	if (size > 0xffff) {
+@@ -878,24 +882,14 @@
+     (void)fflush(stderr);
+ }
+ #else
+-/*VARARGS0*/
+-mess(args)
+-va_list args;
++/* perl16: <stdarg.h>, so the format is a parameter of its own */
++static void
++mess(void *vpat, va_list args)
+ {
+-    char *pat;
++    char *pat = (char *)vpat;
+     char *s;
+-#ifdef CHARVSPRINTF
+-    char *vsprintf();
+-#else
+-    int vsprintf();
+-#endif
+ 
+     s = buf;
+-#ifdef lint
+-    pat = Nullch;
+-#else
+-    pat = va_arg(args, char *);
+-#endif
+     (void) vsprintf(s,pat,args);
+ 
+     s += strlen(s);
+@@ -917,21 +911,16 @@
+     }
+ }
+ 
+-/*VARARGS0*/
+-fatal(va_alist)
+-va_dcl
++int
++fatal(void *pat, ...)
+ {
+     va_list args;
+     extern FILE *e_fp;
+     extern char *e_tmpname;
+     char *tmps;
+ 
+-#ifndef lint
+-    va_start(args);
+-#else
+-    args = 0;
+-#endif
+-    mess(args);
++    va_start(args, pat);
++    mess(pat, args);
+     va_end(args);
+     if (in_eval) {
+ 	str_set(stab_val(stabent("@",TRUE)),buf);
+@@ -966,18 +955,13 @@
+     exit((int)((errno&255)?errno:((statusvalue&255)?statusvalue:255)));
+ }
+ 
+-/*VARARGS0*/
+-warn(va_alist)
+-va_dcl
++int
++warn(void *pat, ...)
+ {
+     va_list args;
+ 
+-#ifndef lint
+-    va_start(args);
+-#else
+-    args = 0;
+-#endif
+-    mess(args);
++    va_start(args, pat);
++    mess(pat, args);
+     va_end(args);
+ 
+     fputs(buf,stderr);
+@@ -1029,7 +1013,7 @@
+     (void)sprintf(environ[i],"%s=%s",nam,val);/* all that work just for this */
+ #else
+     /* MS-DOS requires environment variable names to be in uppercase */
+-    strcpy(environ[i],nam); strupr(environ[i],nam);
++    strcpy(environ[i],nam); strupr(environ[i]);	/* perl16: one argument */
+     (void)sprintf(environ[i] + strlen(nam),"=%s",val);
+ #endif /* MSDOS */
+ }

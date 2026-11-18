@@ -15,7 +15,13 @@
 ;
 ; Linking this object before the C library replaces the library's __STK.
 ;
-; Assemble with: wasm -q -ml -0 [-dSTK16_MARGIN=N] stk16.asm
+; With -dP16_RT, for the runtime build (#17): libc16 has no __STK (its
+; consumers usually build with -s) and no __STACKLOW. The stack starts
+; at wlink's _end, the end of _BSS, where libc16's STACK segment begins
+; (libc16's docs/ABI.md, "Memory layout"; docs/M3-RUNTIME-AUDIT.md,
+; section 6.2).
+;
+; Assemble with: wasm -q -ml -0 [-dSTK16_MARGIN=N] [-dP16_RT] stk16.asm
 
 .8086
 
@@ -26,7 +32,11 @@ endif
 DGROUP group _DATA
 
 _DATA segment word public 'DATA'
+ifdef P16_RT
+        extrn   _end:byte
+else
         extrn   __STACKLOW:word
+endif
 _DATA ends
 
 STK16_TEXT segment word public 'CODE'
@@ -43,7 +53,11 @@ __STK   proc    far
         push    ax
         mov     ax, DGROUP
         mov     ds, ax
+ifdef P16_RT
+        mov     ax, offset DGROUP:_end
+else
         mov     ax, __STACKLOW
+endif
         add     ax, STK16_MARGIN
         jc      pop_overflow
         cmp     bx, ax

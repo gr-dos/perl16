@@ -129,6 +129,19 @@ rules:
   `>` or `|` in it. The child gets the environment, `%ENV` included. It
   needs conventional memory beside Perl's: small DOS commands fit, but a
   second `PERL.EXE` usually doesn't (DOS error 8).
+  - In the runtime build (`make rt`, M3.4), a command with `<`, `>` or
+    `|`, or one that can't be run directly (a `COMMAND.COM` built-in
+    such as `echo` or `set`), reaches `COMSPEC /C` exactly as written,
+    double quotes, spaces and `%` included, with `%ENV` as the
+    environment. The shell is the one `COMSPEC` named when Perl
+    started; changing `$ENV{'COMSPEC'}` passes the new value on but
+    doesn't change the shell. The command can be at most 122
+    characters (`$!` is then "Arg list too long").
+  - A command run directly is split into arguments as a C program's
+    startup splits its command line, so `prog "a b"` gives `prog` one
+    argument, `a b`, and `system` returns its exit status. Through the
+    shell, `system` returns the shell's exit status, which DOSBox-X's
+    `COMMAND.COM` doesn't take from the program.
 - **Piped opens.** These are emulated with temporary files.
   `open(F, "cmd |")` runs `cmd` to completion first, then reads its
   output. `open(F, "| cmd")` collects what you print, and runs `cmd` on

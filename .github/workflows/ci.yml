@@ -50,3 +50,33 @@ jobs:
           make audit
           cat build/audit/report.txt
           cat build/audit/libc16/report.txt
+
+  # The runtime build (M3.4): PERL.EXE linked with libc16 and
+  # libkitchen16 instead of Open Watcom's runtime. A build failure or a
+  # failed smoke, installation or t/ case makes it fail.
+  runtime:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/tools
+          key: libc16-tools-ubuntu-24.04-${{ hashFiles('scripts/fetch-libc16') }}
+
+      - name: Install DOSBox-X, bison and patch
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dosbox-x bison patch
+
+      - name: Build
+        run: make rt
+
+      # Smoke tests, the installation tests and EXECLTST.EXE, then
+      # tests/smoke-rt: system() with quoted commands and %ENV (#22).
+      - name: Test
+        run: make test-rt
+
+      # Perl 3.044's t/ suite against the development build's baseline.
+      - name: Test (t/ suite)
+        run: make test-t-rt

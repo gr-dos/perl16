@@ -39,16 +39,28 @@ workloads are:
            characters and 8 of 3,000 (str_gets(), docs/M2-REPORT.md)
   bigint   t/lib.big from UPSTREAM-DIR (lib/bigint.pl, 246 tests)
 
-A result is checked against the workload's expected last line; a run
-that fails prints FAIL.
+With ALLOC=1, four allocation-heavy workloads follow, the patterns that
+made libc16 0.12's heap slow (docs/M3-RUNTIME-AUDIT.md, section 11.7):
 
-Environment: DOSBOX, WORK (default build/bench), CYCLES (default 315).
+  hash1500  1,500 hash stores, then 750 deletes and an each() loop
+            (tests/smoke/hashbig)
+  grow      a string grown by 3,000 appends, and an array by 3,000 pushes
+  temps     200 rounds of split and join over 60 fields
+  recurse   tests/smoke/recurse: 120 calls deep, 50 with local(), fib(15)
+
+A result is checked against the workload's expected last line; a run
+that fails, or takes more than TIMEOUT seconds, prints FAIL.
+
+Environment: DOSBOX, WORK (default build/bench), CYCLES (default 315),
+ALLOC=1 for the allocation workloads, TIMEOUT seconds of real time per
+run (default 600).
 
 =cut
 
 my ($ticks, $up, @exes) = @ARGV;
 die "usage: $0 TICKS.EXE UPSTREAM-DIR PERL.EXE...\n" unless @exes;
 my $cycles = $ENV{CYCLES} // 315;
+my $timeout = $ENV{TIMEOUT} // 600;
 
 my $work = File::Spec->rel2abs($ENV{WORK} // 'build/bench');
 remove_tree($work);
@@ -80,8 +92,19 @@ my %LOAD = (
     read    => ['open(F, "READ.TXT") || die; while (<F>) { $n++; $c += length($_); } print "read $n $c\n";',
                 qr/^read 608 60000$/m],
     bigint  => [undef, qr/^ok 246$/m],
+    hash1500 => ['for ($i = 0; $i < 1500; $i++) { $h{"k$i"} = $i * 2; } for ($i = 0; $i < 1500; $i += 2) { delete $h{"k$i"}; }'
+              . ' while (($k, $v) = each %h) { $s += $v; } print "hash1500 ", scalar(@x = keys %h), " $s\n";',
+                qr/^hash1500 750 1125000$/m],
+    grow    => ['for ($i = 0; $i < 3000; $i++) { $s .= "abcdefgh"; push(@a, $i); } print "grow ", length($s), " ", scalar(@a), "\n";',
+                qr/^grow 24000 3000$/m],
+    temps   => ['$l = join(",", 1..60); for ($i = 0; $i < 200; $i++) { @w = split(/,/, $l); $l = join(",", reverse @w); $n += @w; }'
+              . ' print "temps $n\n";', qr/^temps 12000$/m],
+    recurse => ['sub d { &d($_[0] + 1) if $_[0] < 120; $_[0]; } sub f { local($n) = @_; $n >= 50 ? 0 : 1 + &f($n + 1); }'
+              . ' sub fib { local($n) = @_; $n < 2 ? $n : &fib($n - 1) + &fib($n - 2); }'
+              . ' print "recurse ", &d(0), " ", &f(0), " ", &fib(15), "\n";', qr/^recurse 0 50 610$/m],
 );
 my @order = qw(startup arith string regex hash subs read bigint);
+push @order, qw(hash1500 grow temps recurse) if $ENV{ALLOC};
 for my $l (@order) {
     next unless defined $LOAD{$l}[0];
     open my $f, '>', "$work/T/\U$l\E.PL";
@@ -100,7 +123,7 @@ for my $exe (@exes) {
         my %f = dos_files("$work/T");
         unlink grep { defined } @f{qw(OUT.TXT T0.TXT T1.TXT)};
         run_batch($work, ['@echo off', 'cd \T', '\TICKS >T0.TXT',
-            "\\PERL.EXE \U$l\E.PL >OUT.TXT", '\TICKS >T1.TXT'], 600,
+            "\\PERL.EXE \U$l\E.PL >OUT.TXT", '\TICKS >T1.TXT'], $timeout,
             "$work/R" . ++$n . '.LOG');
         %f = dos_files("$work/T");
         my $out = $f{'OUT.TXT'} ? slurp($f{'OUT.TXT'}) =~ s/\r//gr : '';

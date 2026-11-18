@@ -1,0 +1,30 @@
+PROMPT inherited
+tail[ /C echo "a  b"  c "d \"e\" f"	t %P16ADD% <in >out | more ; x]
+env[COMSPEC=C:\TAILTST.EXE]
+env[P16ADD=added value]
+env[P16EXIT=5]
+env[PATH=C:\;Z:\]
+status 5
+tail[ "a  b" "c\"d" e\ ""]
+env[COMSPEC=C:\TAILTST.EXE]
+env[P16ADD=added value]
+env[P16EXIT=5]
+env[PATH=C:\;Z:\]
+status 5
+tail[ /C nosuchcm "x y"]
+env[COMSPEC=C:\TAILTST.EXE]
+env[P16ADD=added value]
+env[P16EXIT=5]
+env[PATH=C:\;Z:\]
+status 5
+tail[ /C echo >x]
+env[COMSPEC=C:\NOPE.COM]
+env[P16EXIT=0]
+env[PATH=C:\;Z:\]
+status 0
+tail[ /C echo >xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx]
+env[COMSPEC=C:\NOPE.COM]
+env[P16EXIT=7]
+env[PATH=C:\;Z:\]
+status 7
+status -1 (Arg list too long)

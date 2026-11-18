@@ -11,8 +11,8 @@ Measured on 2026-11-17 with:
 
 - Open Watcom 2026-10-01-Build, the snapshot both libc16 0.04 and 0.07 pin;
 - libc16 0.07 (then the latest release, `c23f0c7`), pinned at the time in
-  `scripts/fetch-libc16` (perl16 now pins libc16 0.12 and libkitchen16
-  0.02: section 11.6);
+  `scripts/fetch-libc16` (perl16 now pins libc16 0.15 and libkitchen16
+  0.02: sections 11.6 and 11.7);
 - Perl 3.044 plus `patches/0001`–`0008`, as at the M2 merge (`51df9eb`).
 
 Section 13 has the commands that reproduce every number.
@@ -778,10 +778,10 @@ What this means for perl16:
 - **Release 0.02** (0.01 was the first). The pin is `version=0.02`,
   `sha256=2ca356b7d2a23442b7851b10c09cfa577ee3888eaf5b4b899f10ee494162cb85`
   (`libkitchen16-0.02.zip.sha256`). It was built against libc16 0.07.
-  perl16 pins it with libc16 0.12 (section 11.6), which libkitchen16
-  allows (that version or newer). M3.4, which links them, checks that
-  the two work together: libkitchen16 uses libc16's `errno` and `FILE`
-  output.
+  perl16 pins it with libc16 0.15 (sections 11.6 and 11.7), which
+  libkitchen16 allows (that version or newer). M3.4 links them, and its
+  tests show the two work together: libkitchen16 uses libc16's `errno`
+  and `FILE` output.
 - **Larger than budgeted.** libkitchen16's `make size`
   ([libkitchen16#6](https://github.com/gr-dos/libkitchen16/pull/6))
   links perl16's set of functions in the large model. That is the
@@ -820,7 +820,11 @@ What this means for perl16:
 
 ### 11.6 Pins
 
-perl16 pins **libc16 0.12** (`scripts/fetch-libc16`) and **libkitchen16
+(M3.4 has since moved libc16 to 0.14, for its heap, and to 0.15, for
+`libc16_systeme`: section 11.7. Their headers are 0.12's but for
+`libc16_systeme`'s declaration, so what follows still holds.)
+
+perl16 pinned **libc16 0.12** (`scripts/fetch-libc16`) and **libkitchen16
 0.02** (`scripts/fetch-libkitchen16`, new), each by its release's
 SHA-256. The Makefile fails if the two name different Open Watcom
 snapshots. They name the same one, so `build/dev/PERL.EXE` is unchanged
@@ -857,6 +861,195 @@ libc16's, as libkitchen16's consumers do, and links `LIBK16L.LIB` with
   missing until they compile. They are on #16's list.
 
 
+### 11.7 The runtime build (M3.4, in progress)
+
+`make rt` builds `build/rt/PERL.EXE`: the same sources compiled against
+libc16 0.15's and libkitchen16 0.02's headers and linked with their
+libraries alone (`option nodefaultlibs`), with no Open Watcom runtime.
+`make test-rt` runs the smoke and installation tests on it. The
+development build (`make`, `make test`) is unchanged and still passes.
+
+**How it compiles (#16).** `msdos/p16rt.h` is force-included in every
+module (`wcc -fi`). Under `P16_RT` it includes every libc16 and
+libkitchen16 header the interpreter needs, so each library call has its
+`__cdecl` prototype in scope before Perl's own K&R declarations, which
+agree with them. `patches/0009-p16rt.patch` does the rest:
+- `<stdarg.h>` for `deb`, `fatal`, `warn` and `mess`;
+- `P16_CB` (`__cdecl` under `P16_RT`) on the `qsort`, `signal` and
+  `atexit` callbacks;
+- no `stdaux`/`stdprn`;
+- libc16's DOS-error mapping in `ioctl`.
+
+It also fixes `setenv`'s call of `strupr`, which passed two arguments to
+a one-argument function. The link has no undefined symbol and no
+register-convention call to either library.
+
+**perl16's own shims (#17).**
+- `environ`: `msdos/environ.c`, set up from libc16's init table
+  (`msdos/p16init.asm`).
+- `exec`: `msdos/exec16.c`, which spawns with `environ` and exits with
+  the child's status. `execl` takes at most 64 arguments, the most a
+  126-byte command tail can hold; more fail with `E2BIG` and run
+  nothing, as does a longer tail (libc16's spawn). `EXECLTST.EXE`
+  (`tests/tools/execltst.c`) tests both limits in `tests/run-install`.
+- Spawns: `do_aspawn` and `do_spawn` pass `environ` (`spawnvpe`,
+  `spawnve`), so children see `%ENV`.
+- Piped opens: the temporary file comes from `etemp.c`'s exclusive
+  creation instead of `tempnam`.
+- `stk16.asm` takes the stack bottom from `_end`.
+
+**Findings.**
+- **Perl's `main` overwrote DOS's memory arena.** libc16's startup calls
+  `main(argc, argv)` with `SP` at the top of the stack, which is the end
+  of the program's memory block. Perl's `main` has a third parameter,
+  `env`, which is therefore the next paragraph: the DOS memory control
+  block that follows. Patch 0004's `env = environ;` overwrote it, and the
+  program hung before any output reached its file. Under `P16_RT`, `main`
+  takes two parameters and `env` is a local. Any libc16 program whose
+  `main` writes a parameter it wasn't passed does the same. libc16 could
+  guard against it with a few bytes of slack above the stack top.
+- **The shell's command was quoted.** libc16's spawn functions quote an
+  argument containing a space, and `COMMAND.COM` doesn't undo the
+  quoting. Until 0.15, `do_spawn` passed the command as words
+  (separated by single spaces), and one containing a double quote went
+  through `system()`, with DOS's environment rather than `%ENV`.
+  [libc16#31](https://github.com/gr-dos/libc16/issues/31) added
+  `libc16_systeme`, which removes both limits (below, #22).
+- **libc16 0.12's heap was quadratic with many free blocks**
+  ([libc16#30](https://github.com/gr-dos/libc16/issues/30); fixed in
+  0.14, below). Measured with libc16 alone, on the emulated 8086:
+  - with 2,000 free holes, 2,000 allocations that don't fit them take
+    1,123 ticks (62 s);
+  - 4,000 growing `realloc`s take 4,099 ticks (225 s);
+  - each doubling of the count multiplies the time by four.
+
+  Perl's hashes and strings produce this pattern. A 1,500-key hash takes
+  55 s to fill, against 1.3 s in the development build. `hashbig` and
+  `recurse` give the right output but take 200 s and 99 s, beyond the
+  smoke tests' 60 s limit. Arithmetic and string loops are within 1.5 s
+  of the development build.
+- **`fpfmt` passes.** libkitchen16's `printf` rounds a tie to even and
+  gets the 20th digit right, where Open Watcom's didn't (section 11.5).
+
+**libc16 0.14 (#21).** libc16 0.14
+(`sha256=777693e1…faeaa09`, from its release's `.sha256`) replaces the
+heap with segregated free lists and boundary tags, so a call's time no
+longer grows with the number of blocks (libc16's `docs/spec/heap.md`,
+"Performance"). Its headers are byte for byte 0.12's and it names the
+same Open Watcom snapshot, so nothing in perl16 changed but the pin.
+The link map of the clean rebuild has modules from `LIBC16L.LIB` (107)
+and `LIBK16L.LIB` (36) and none from Open Watcom's runtime.
+
+`scripts/bench` timed the M2 workloads and, with `ALLOC=1`, four
+allocation-heavy ones (`hash1500` is `tests/smoke/hashbig`, `recurse`
+is `tests/smoke/recurse`; `grow` is 3,000 string appends and array
+pushes; `temps` is 200 rounds of `split` and `join` over 60 fields).
+Emulated seconds at 3,150 cycles per millisecond (ten times
+`scripts/bench`'s default, which would leave 0.12's runs at half an
+hour each):
+
+| Build | startup | arith | string | regex | hash | subs | read | bigint | hash1500 | grow | temps | recurse |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| dev (M2) | 0.1 | 1.8 | 0.9 | 0.9 | 1.3 | 1.4 | 1.0 | 15.3 | 5.0 | 2.6 | 8.0 | 6.7 |
+| rt, libc16 0.12 | 0.1 | 3.9 | 3.2 | 1.8 | 17.5 | 3.2 | 2.0 | 235.3 | 79.8 | 134.9 | 33.3 | 96.6 |
+| rt, libc16 0.14 | 0.1 | 3.8 | 1.2 | 1.2 | 2.3 | 1.8 | 1.9 | 18.6 | 8.0 | 3.8 | 8.1 | 7.1 |
+
+- The allocation workloads are 4 to 35 times faster than with 0.12
+  (`temps` 4, `hash1500` 10, `recurse` 14, `grow` 35), and within 1.6
+  times the development build; `bigint` (`t/lib.big`) is 1.2 times it.
+- The 1,500-key hash of the earlier measurement (insertion only) now
+  takes 6.1 s of wall time in a `tests/run-dos` session, against 4.2 s
+  for the development build and 55 s with 0.12; each figure includes
+  about 3 s of DOSBox-X starting.
+- What remains slower is not the heap. `arith` is twice the
+  development build's, from libkitchen16's soft-float helpers against
+  Open Watcom's (section 11.5); `read` is twice it too, not yet
+  explained (#17's stream-buffering measurement is the next step).
+- 0.14's costs, from its spec: `malloc`, `free` and `realloc` are 1,311
+  bytes of code against 621 in the compact model (far data, as here),
+  the free lists take 208 bytes of `DGROUP` against 6, and a block is
+  at least 12 bytes with far data.
+
+**Tests, 2026-11-18 (DOSBox-X 2026.01.02, emulated 8086), with libc16
+0.14.**
+- `make test`: 21 passed, `fpfmt` todo; 35 of 35 install cases.
+- `make test-rt`: 22 of 22 passed, `hashbig` and `recurse` among them,
+  within the unchanged 60 s limit; 36 of 36 install cases (the 35, and
+  `EXECLTST.EXE`). `fpfmt` passes, but is still marked todo.
+- `make test-t-rt`: 53 of 72 `t/` scripts pass, the development
+  build's baseline exactly; `lib.big` passes within the 120 s limit.
+- With 0.12, `hashbig`, `recurse` and `lib.big` gave the right output
+  but timed out, and the runtime tests allowed exactly that until this
+  pin (`SLOW` in `tests/run-dos` and `tests/run-t`, which remains for
+  any build that needs it).
+- `make audit` compiles all 25 sources against libc16 0.14 and
+  libkitchen16 0.02. Every `__cdecl` reference resolves, and what's
+  missing is perl16's own shims (`environ`, the `exec` family,
+  `_hdopen`), which the audit doesn't link.
+- CI runs `make rt`, `make test-rt` and `make test-t-rt` in a job of
+  their own.
+
+**libc16 0.15 (#22).** libc16 0.15
+(`sha256=042b6d2d…0f287`, from its release's `.sha256`) adds
+`libc16_systeme(cmd, envp)`
+([libc16#31](https://github.com/gr-dos/libc16/issues/31)): `system`
+with an environment, which passes `cmd` to `COMSPEC /C` byte for byte.
+The only header change is its declaration in `<process.h>`; the Open
+Watcom snapshot is the same, so libkitchen16 stays at 0.02. In
+`do_spawn` (patch 0009):
+- The shell path is `libc16_systeme(cmd, environ)`, replacing both the
+  word-splitting `spawnve` and the `system()` fallback for commands
+  with a double quote.
+- The shell is the one the `COMSPEC` DOS gave Perl names, as before
+  (libc16 takes it from its own `getenv`, which reads that block). A
+  `COMSPEC` in `%ENV` is passed on but doesn't choose it.
+- A command run directly (no `<`, `>` or `|`) is now split as
+  libc16's startup splits a command tail, double quotes and
+  backslashes included, rather than at every space, so that
+  `spawnvpe`'s quoting gives the program the arguments the command
+  names. Sending quoted commands to the shell instead would lose their
+  exit status: DOSBox-X's `COMMAND.COM /C` returns its own (1 here),
+  not the program's.
+
+Compared with the development build (M2), which passes the command
+through Open Watcom's `spawnl` and `spawnvp`: a direct program gets
+the same arguments, now with `%ENV`; the shell gets the command
+unchanged in both. Both builds return the shell's exit status, not the
+program's, for a shell command. In both, a second `PERL.EXE` run from
+Perl exits with 8, as `docs/DOS.md` says: there isn't the memory for
+it.
+
+`tests/smoke-rt` holds the runtime build's own cases, which `make
+test-rt` runs with `TAILTST.EXE` (`tests/tools/tailtst.c`), a program
+that prints its command tail byte for byte and its environment and
+exits with `P16EXIT`:
+- `shraw`, with `TAILTST.EXE` as `COMSPEC`:
+  - a shell command with double spaces, escaped quotes, a tab, `%`,
+    `<`, `>`, `|` and `;` reaches `/C` byte for byte;
+  - the environment has the added, changed and deleted variables;
+  - a quoted command run directly keeps its arguments and status;
+  - one that can't be run falls back to the shell;
+  - a `COMSPEC` set in `%ENV` is passed on without choosing the shell;
+  - exit statuses 0, 5 and 7 come back;
+  - 122 bytes run, and 123 fail with `E2BIG` and run nothing.
+- `shenv`, with DOSBox-X's `COMMAND.COM`: a command with two quoted
+  arguments and a redirection reaches `TAILTST.EXE` as written with
+  `%ENV`, and the shell's own `set` shows `%ENV` too.
+
+`tests/run-dos` gained `# setup:` lines (run before Perl, here to set
+`COMSPEC`) and `FILES` (extra fixtures, here `TAILTST.EXE`).
+
+**Tests, 2026-11-18, with libc16 0.15.**
+- `make test`: 21 passed, `fpfmt` todo; 35 of 35 install cases.
+- `make test-rt`: 22 of 22 smoke, 2 of 2 `smoke-rt`, 36 of 36 install.
+- `make test-t-rt`: 53 of 72, the baseline.
+- `make audit`: all 25 sources compile.
+- The link map has `LIBC16L.LIB` (109 modules, `systeme` among them)
+  and `LIBK16L.LIB` (36) and nothing of Open Watcom's runtime.
+- `scripts/bench ALLOC=1` gives 0.14's figures to the tenth of a
+  second, so the heap fix is intact.
+
+
 ## 12. Issue breakdown
 
 These issues were opened from this audit. Each one's scope is the row
@@ -880,9 +1073,12 @@ All four libc16 issues are released, and libc16 0.12 (2026-11-18) has every
 one of them. 0.12 also reserves code offset 0 in the small and compact
 models so that no function pointer is null
 ([libc16#27](https://github.com/gr-dos/libc16/issues/27)); perl16 is
-large-model and unaffected. perl16 now pins 0.12, with libkitchen16
-0.02. Section 11.6 has the audit against both; the counts in sections 4
-to 6 are against 0.07.
+large-model and unaffected. Section 11.6 has the audit against 0.12 and
+libkitchen16 0.02; the counts in sections 4 to 6 are against 0.07.
+[libc16#30](https://github.com/gr-dos/libc16/issues/30), the heap's
+quadratic time, which M3.4 found, is fixed in 0.14 (#21), and
+[libc16#31](https://github.com/gr-dos/libc16/issues/31), `libc16_systeme`, is
+in 0.15, which perl16 now pins (#22; section 11.7).
 
 ## 13. Reproducing
 

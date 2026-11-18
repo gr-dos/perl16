@@ -33,6 +33,7 @@ its reasons.
 | `0006-str-gets.patch` | perl16 | `str.c` | `str_gets()`: a 512-byte buffer in place of 8 KB of DGROUP, and lines with NUL bytes kept whole |
 | `0007-dos-inc-etemp.patch` | perl16 | `perly.c` | `@INC` from `PERL.EXE`'s directory, the `-e` file in `TEMP`/`TMP` created exclusively, `-P` refused |
 | `0008-dos-glob.patch` | perl16 | `msdos/popen.c` | `<*.c>` without a helper program |
+| `0009-p16rt.patch` | perl16 | `cmd.c`, `dolist.c`, `msdos/msdos.c`, `msdos/popen.c`, `perly.c`, `stab.c`, `util.c` | compile and run against libc16 and libkitchen16 (M3.4): `<stdarg.h>`, `__cdecl` callbacks, `main` with two parameters, `environ` for children, the piped-open file from `etemp.c` |
 
 ## Generated files
 
@@ -52,10 +53,12 @@ the procedure for changing the pin.
 | `msdos/exepath.c`, `exepath.h` | the directory `PERL.EXE` was loaded from, for `@INC` (docs/M2-REPORT.md, section 5) |
 | `msdos/etemp.c`, `etemp.h` | the `-e` temporary file (docs/M2-REPORT.md, section 6) |
 | `msdos/dosglob.c`, `dosglob.h` | filename globbing (docs/M2-REPORT.md, section 7) |
-| `msdos/stk16.asm` | the stack check: a guard margin, and overflow reported on standard error with status 255; in the default build since M2 (docs/M2-REPORT.md, section 4) |
+| `msdos/stk16.asm` | the stack check: a guard margin, and overflow reported on standard error with status 255; in the default build since M2 (docs/M2-REPORT.md, section 4); on `_end` in the runtime build (M3.4) |
+| `msdos/p16rt.h` | force-included in every module: the library prototypes in the runtime build, and `P16_CB`, the callback convention (M3.4) |
+| `msdos/environ.c`, `environ.h`, `msdos/exec16.c`, `msdos/p16init.asm` | `environ` and the `exec` family, which libc16 doesn't have; runtime build only (M3.4) |
 | `msdos/sswitch.c`, `msdos/brk16.asm` | running Perl on a stack segment of its own (SS != DS); M1 experiment, not in the default build |
 | `scripts/audit-include/*` | audit-only stand-ins for what libc16's and libkitchen16's headers lack, used by `scripts/audit-libc16` and never by the build; written from ISO C and POSIX (their `README`; docs/M3-RUNTIME-AUDIT.md, section 2) |
-| `scripts/fetch-libc16`, `scripts/fetch-libkitchen16` | copies of libc16's and libkitchen16's `consumers/` fetch scripts (MIT), set to the pinned releases: libc16 0.12 and libkitchen16 0.02, each checked by its release's SHA-256 |
+| `scripts/fetch-libc16`, `scripts/fetch-libkitchen16` | copies of libc16's and libkitchen16's `consumers/` fetch scripts (MIT), set to the pinned releases: libc16 0.15 and libkitchen16 0.02, each checked by its release's SHA-256 |
 | `scripts/*`, `tests/*`, `Makefile` | build, audit and test tooling |
 | `upstream/*.sha256` | hashes of the upstream source, reference material and generated parser |
 
