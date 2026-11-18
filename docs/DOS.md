@@ -191,3 +191,9 @@ nonzero exit without one.
 - In this build, temporary files for piped opens go where Open Watcom's
   `tempnam()` puts them (`TMP`, else the root directory), not where
   `-e`'s do.
+- In this build, comparisons with a NaN (`9**9**9 - 9**9**9`) or an
+  infinity can be wrong: Open Watcom's floating-point emulator makes a
+  NaN equal to every number, and `0 == 9**9**9` true. The runtime build
+  (`make rt`, M3.4) compares them as Perl 3 does on an IEEE machine,
+  and treats `-0.0` and the smallest numbers (below about `1e-308`)
+  correctly too (docs/M3-RUNTIME-AUDIT.md, section 11.7).
