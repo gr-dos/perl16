@@ -1,0 +1,6 @@
+PROMPT inherited
+tail[ "a  b" "c d"]
+env[P16ADD=added value]
+env[PATH=C:\;Z:\]
+P16ADD=added value
+PATH=C:\;Z:\

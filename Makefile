@@ -137,9 +137,12 @@ $(DEV)/%.obj: msdos/%.c $(P16_HEADERS) $(TOOLS_ENV) Makefile
 rt: $(RT)/PERL.EXE
 
 # The runtime build's tests: the same smoke and installation tests, in
-# their own work directories, and EXECLTST.EXE.
-test-rt: $(RT)/PERL.EXE $(TEST_TOOLS) $(RT)/EXECLTST.EXE
+# their own work directories, and EXECLTST.EXE; then tests/smoke-rt,
+# its own cases (system() with %ENV, #22), with TAILTST.EXE.
+test-rt: $(RT)/PERL.EXE $(TEST_TOOLS) $(RT)/EXECLTST.EXE $(DEV)/TAILTST.EXE
 	WORK=build/run-dos-rt perl tests/run-dos $(RT)/PERL.EXE tests/smoke
+	WORK=build/run-dos-rt2 FILES=$(DEV)/TAILTST.EXE perl tests/run-dos \
+	  $(RT)/PERL.EXE tests/smoke-rt
 	WORK=build/run-install-rt perl tests/run-install $(RT)/PERL.EXE \
 	  $(TEST_TOOLS) $(RT)/EXECLTST.EXE
 
@@ -257,6 +260,13 @@ $(DEV)/ETEMPTST.EXE: tests/tools/etemptst.c msdos/etemp.c $(P16_HEADERS) \
   $(TOOLS_ENV)
 	$(WATCOM_ENV) && $(CC) $(DEV_CFLAGS) -fo=$(DEV)/etemptst.obj $< && \
 	  wlink option quiet system dos name $@ file $(DEV)/etemptst.obj
+
+# TAILTST.EXE prints its command tail and environment, for
+# tests/smoke-rt; built like ERR2OUT.EXE.
+$(DEV)/TAILTST.EXE: tests/tools/tailtst.c $(TOOLS_ENV)
+	$(WATCOM_ENV) && $(CC) -q -zq -ms -0 -bt=dos -I$$WATCOM/h \
+	  -fo=$(DEV)/tailtst.obj $< && \
+	  wlink option quiet system dos name $@ file $(DEV)/tailtst.obj
 
 $(DEV)/ERR2OUT.EXE: tests/tools/err2out.c $(TOOLS_ENV)
 	$(WATCOM_ENV) && $(CC) -q -zq -ms -0 -bt=dos -I$$WATCOM/h \

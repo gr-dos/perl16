@@ -72,7 +72,8 @@ jobs:
       - name: Build
         run: make rt
 
-      # Smoke tests, then the installation tests and EXECLTST.EXE.
+      # Smoke tests, the installation tests and EXECLTST.EXE, then
+      # tests/smoke-rt: system() with quoted commands and %ENV (#22).
       - name: Test
         run: make test-rt
 
