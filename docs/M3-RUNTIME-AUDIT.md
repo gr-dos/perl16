@@ -749,7 +749,7 @@ below, and its detail is the section of this document it cites.
 
 | Issue | Title | Scope | Phase |
 |---|---|---|---|
-| [gr-dos/libc16#18](https://github.com/gr-dos/libc16/issues/18) | setjmp and longjmp (C89 7.6) | sections 6.3, 7.3 | M3.2 |
+| [gr-dos/libc16#19](https://github.com/gr-dos/libc16/issues/19) | setjmp and longjmp (C89 7.6) | sections 6.3, 7.3 | M3.2 |
 | [gr-dos/libc16#20](https://github.com/gr-dos/libc16/issues/20) | system, the spawn family and getpid | section 6.6: `system`, `spawnv`, `spawnve`, `spawnvp`, `spawnvpe`, `spawnl` (`P_WAIT`), `getpid` | M3.2 |
 | [gr-dos/libc16#21](https://github.com/gr-dos/libc16/issues/21) | signal and raise (C89 7.7), SIGINT through INT 23h | sections 6.6, 7.4 | M3.2 |
 | [gr-dos/libc16#22](https://github.com/gr-dos/libc16/issues/22) | small C89 and Microsoft C functions for perl16 | sections 6.2–6.7: `atexit`; `time`, `gmtime`; `rand`, `srand`; `isatty`, `dup`, `dup2`, `fdopen`, `rmdir`, `strupr` | M3.2 |
