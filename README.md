@@ -48,7 +48,7 @@ Perl 5.36 or later and, for the tests, `dosbox-x`.
 `make` fetches and checks everything else:
 
 - tag `perl-3.044` of the Perl repository (`scripts/fetch-upstream`)
-- the pinned libc16 release (`scripts/fetch-libc16`, 0.12)
+- the pinned libc16 release (`scripts/fetch-libc16`, 0.14)
 - the pinned libkitchen16 release (`scripts/fetch-libkitchen16`, 0.02),
   floating point and formatting for M3
 - the Open Watcom snapshot that libc16 names (libkitchen16 must name the
