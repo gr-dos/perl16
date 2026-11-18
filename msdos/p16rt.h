@@ -44,12 +44,14 @@
 #include <math.h>
 #include <kitchen16.h>
 #include "environ.h"		/* environ and exec, perl16's own (#17) */
+#include "p16fp.h"		/* comparisons -fpc gets wrong (#16) */
 
 #define P16_CB __cdecl
 
 #else
 
 #define P16_CB
+#include "p16fp.h"
 
 #endif
 

@@ -150,10 +150,13 @@ rt: $(RT)/PERL.EXE
 
 # The runtime build's tests: the same smoke and installation tests, in
 # their own work directories, and EXECLTST.EXE; then tests/smoke-rt,
-# its own cases (system() with %ENV, #22), with TAILTST.EXE.
-test-rt: $(RT)/PERL.EXE $(TEST_TOOLS) $(RT)/EXECLTST.EXE $(DEV)/TAILTST.EXE
+# its own cases (system() with %ENV, #22, with TAILTST.EXE; numeric
+# comparisons, #16, with FPCTST.EXE).
+test-rt: $(RT)/PERL.EXE $(TEST_TOOLS) $(RT)/EXECLTST.EXE $(DEV)/TAILTST.EXE \
+  $(RT)/FPCTST.EXE
 	WORK=build/run-dos-rt BUILD=rt perl tests/run-dos $(RT)/PERL.EXE tests/smoke
-	WORK=build/run-dos-rt2 BUILD=rt FILES=$(DEV)/TAILTST.EXE perl tests/run-dos \
+	WORK=build/run-dos-rt2 BUILD=rt \
+	  FILES="$(DEV)/TAILTST.EXE $(RT)/FPCTST.EXE" perl tests/run-dos \
 	  $(RT)/PERL.EXE tests/smoke-rt
 	WORK=build/run-install-rt perl tests/run-install $(RT)/PERL.EXE \
 	  $(TEST_TOOLS) $(RT)/EXECLTST.EXE
@@ -166,6 +169,18 @@ EXECLTST_OBJS = $(RT)/execltst.obj $(RT)/stk16.obj $(RT)/exec16.obj \
 $(RT)/EXECLTST.EXE: $(EXECLTST_OBJS) $(LIBC16L) $(LIBK16L) $(TOOLS_ENV)
 	$(WATCOM_ENV) && wlink $(RT_LDOPTS) format dos name $@ \
 	  $(EXECLTST_OBJS:%=file %) library $(LIBK16L) library $(LIBC16L)
+
+# FPCTST.EXE, the C layer of tests/smoke-rt/fpcmp.pl (#16): the
+# compiler's comparisons and p16fp.h's, compiled like the runtime build.
+FPCTST_OBJS = $(RT)/fpctst.obj $(RT)/stk16.obj $(RT)/p16fp.obj
+
+$(RT)/FPCTST.EXE: $(FPCTST_OBJS) $(LIBC16L) $(LIBK16L) $(TOOLS_ENV)
+	$(WATCOM_ENV) && wlink $(RT_LDOPTS) format dos name $@ \
+	  $(FPCTST_OBJS:%=file %) library $(LIBK16L) library $(LIBC16L)
+
+$(RT)/fpctst.obj: tests/tools/fpctst.c $(P16_HEADERS) $(RT_SYMS) \
+  $(TOOLS_ENV) scripts/check-w131 Makefile
+	$(RT_COMPILE)
 
 $(RT)/execltst.obj: tests/tools/execltst.c $(P16_HEADERS) $(RT_SYMS) \
   $(TOOLS_ENV) scripts/check-w131 Makefile
