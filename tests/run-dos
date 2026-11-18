@@ -29,6 +29,10 @@ is turned into LF. Comment lines at the top of the script can say:
   # command: ARGS    run PERL ARGS instead of PERL NAME.PL
   # setup: LINE      a batch line run before PERL (any number of them)
   # todo: REASON     a known failure: reported, but not counted as one
+  # todo-BUILD: REASON
+                     the same, only when BUILD (below) is BUILD, such
+                     as todo-dev: a failure of one build that the
+                     others must not have
 
 Any other file in DIR is a fixture, copied into the work directory
 under its name in upper case.
@@ -52,8 +56,10 @@ entry can be removed. A name that isn't a case is an error.
 
 Environment: DOSBOX (default dosbox-x), DOSBOX_TIMEOUT seconds per case
 (default 60), WORK (default build/run-dos) the work directory, KEEP=1 to
-keep it, SLOW the file of slow cases, FILES more fixtures (paths
-separated by spaces, such as built test tools), copied like the others.
+keep it, BUILD the build being tested (for todo-BUILD; the Makefile
+passes dev or rt), SLOW the file of slow cases, FILES more fixtures
+(paths separated by spaces, such as built test tools), copied like the
+others.
 
 =cut
 
@@ -80,6 +86,8 @@ for my $dir (@dirs) {
             $case{status}  = $1 if /^#\s*status:\s*(\d+)/;
             $case{command} = "PERL $1" if /^#\s*command:\s*(.+?)\s*$/;
             $case{todo}    = $1 if /^#\s*todo:\s*(.+?)\s*$/;
+            $case{todo}    = $2 if /^#\s*todo-(\w+):\s*(.+?)\s*$/
+                && defined $ENV{BUILD} && $1 eq $ENV{BUILD};
             push @{ $case{setup} }, $1 if /^#\s*setup:\s*(.+?)\s*$/;
         }
         (my $exp = $pl) =~ s/\.pl$/.out/;
