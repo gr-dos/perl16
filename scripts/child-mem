@@ -1,0 +1,92 @@
+#!/usr/bin/env perl
+
+use 5.036;
+use warnings;
+use File::Copy qw(copy);
+use File::Path qw(make_path remove_tree);
+use FindBin;
+use lib "$FindBin::Bin/../tests";
+use DosRun qw(write_config run_batch dos_files slurp);
+
+=head1 NAME
+
+child-mem - the conventional memory a child of PERL.EXE gets
+
+=head1 SYNOPSIS
+
+  scripts/child-mem FREEMEM.EXE PERL.EXE...
+
+=head1 DESCRIPTION
+
+For each PERL.EXE, runs FREEMEM.EXE (tests/tools/freemem.c, built by
+make variants) under DOSBox-X on an emulated 8086, first from the
+command line and then as Perl's child through C<system>, at points in
+one script:
+
+  start    before the script has allocated anything
+  holding  while it holds 100 KB of strings (1,000 of 100 bytes)
+  freed    after it has freed them (undef of the array)
+
+and prints the bytes free for each, and how much less than from the
+command line that is: Perl's own memory as a child sees it. The
+development build's heap is Open Watcom's; the runtime build's is
+libc16's, which grows Perl's DOS block as it needs memory and never
+gives it back (docs/M3-RUNTIME-AUDIT.md, section 7.7).
+
+Environment: DOSBOX, WORK (default build/child-mem).
+
+=cut
+
+my ($freemem, @exes) = @ARGV;
+die "usage: $0 FREEMEM.EXE PERL.EXE...\n" unless @exes;
+my $root = $ENV{WORK} // 'build/child-mem';
+
+my $script = <<'EOF';
+sub child {
+    local($label) = @_;
+    open(SAVE, ">&STDOUT");
+    open(STDOUT, ">FM.TMP") || die "FM.TMP: $!\n";
+    $r = system("FREEMEM.EXE");
+    close(STDOUT);
+    open(STDOUT, ">&SAVE") || die "dup: $!\n";
+    open(F, "FM.TMP") || die "FM.TMP: $!\n";
+    $n = <F>;
+    close(F);
+    chop($n);
+    print "$label $n $r\n";
+}
+&child('start');
+for ($i = 0; $i < 1000; $i++) { $a[$i] = 'x' x 100; }
+&child('holding');
+undef @a;
+&child('freed');
+EOF
+
+say sprintf "%-24s %8s %8s %8s %8s", 'bytes free for a child', 'alone',
+    'start', 'holding', 'freed';
+for my $exe (@exes) {
+    my $work = "$root/w";
+    remove_tree($work);
+    make_path($work);
+    copy($exe, "$work/PERL.EXE") or die "copy $exe: $!\n";
+    copy($freemem, "$work/FREEMEM.EXE") or die "copy $freemem: $!\n";
+    open my $fh, '>', "$work/CM.PL" or die "CM.PL: $!\n";
+    print $fh $script;
+    close $fh;
+    write_config($work);
+    my $timeout = run_batch($work,
+	['FREEMEM > ALONE.OUT', 'PERL CM.PL > CM.OUT'], 120, "$work/RUN.LOG");
+    die "$exe: timed out\n" if $timeout;
+    my %f = dos_files($work);
+    my ($alone) = slurp($f{'ALONE.OUT'}) =~ /(\d+)/;
+    my %got;
+    for (split /\n/, slurp($f{'CM.OUT'} // die "$exe: no output\n")) {
+	my ($label, $n, $r) = split;
+	die "$exe: $label: FREEMEM status $r\n" if $r;
+	$got{$label} = $n;
+    }
+    say sprintf "%-24s %8d %8d %8d %8d", $exe, $alone,
+	map { $got{$_} // die "$exe: no $_\n" } qw(start holding freed);
+    say sprintf "%-24s %8s %8d %8d %8d", '  Perl uses', '',
+	map { $alone - $got{$_} } qw(start holding freed);
+}

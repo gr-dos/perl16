@@ -1,0 +1,8 @@
+before: nothing
+A: not ready: action 3, drive A: not ready
+B: write-protected: action 3, drive B: write-protected
+C: unknown code: action 3, drive C: critical error
+PRN out of paper: action 3, PRN: out of paper
+strerror(EACCES): Permission denied
+strerror(ENOENT): No such file or directory
+status 0

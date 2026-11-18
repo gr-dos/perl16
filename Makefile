@@ -99,11 +99,12 @@ DEV_OBJS    = $(DEV)/stk16.obj $(PERL_NAMES:%=$(DEV)/%.obj) \
 # object, and scripts/check-w131 fails the build on W131 (no prototype)
 # for a function of either library (#16). libkitchen16 comes first, in
 # the include path and the link. RT_NAMES are perl16's for this build
-# alone: environ and the exec family, which libc16 doesn't have, and the
-# numeric tests -fpc gets wrong (p16fp.h); p16init.asm puts environ's
-# set-up in libc16's init table.
+# alone: environ and the exec family, which libc16 doesn't have, the
+# numeric tests -fpc gets wrong (p16fp.h), the INT 24h handler
+# (harderr.c), and <ctype.h> as a table (ctype16.c); p16init.asm puts
+# environ's set-up and the handler's in libc16's init table.
 RT          := build/rt
-RT_NAMES    = environ exec16 p16fp
+RT_NAMES    = environ exec16 p16fp harderr ctype16
 RT_CFLAGS   = -q -zq -zl -zld -x -ml -0 -fpc -zc -bt=dos -DMSDOS \
               -DCRIPPLED_CC -DP16_RT -fi=msdos/p16rt.h -wx -I$(SRC) -Imsdos \
               -I$(LIBKITCHEN16_DIR)/include -I$(LIBC16_DIR)/include
@@ -111,7 +112,14 @@ RT_AFLAGS   = $(DEV_AFLAGS) -dP16_RT
 RT_OBJS     = $(RT)/stk16.obj $(PERL_NAMES:%=$(RT)/%.obj) \
               $(PORT_NAMES:%=$(RT)/%.obj) $(P16_NAMES:%=$(RT)/%.obj) \
               $(RT_NAMES:%=$(RT)/%.obj) $(RT)/p16init.obj
-RT_LDOPTS   = option quiet, nodefaultlibs, stack=$(STACK)
+# The stack (#17, docs/M3-RUNTIME-AUDIT.md, section 11.7): libc16's heap
+# is outside DGROUP, so the stack takes what static data leave of it,
+# but RT_DGROUP_MIN_FREE, so that more static data fails the link
+# rather than overflowing DGROUP. STK16_MARGIN is the development
+# build's 2 KB.
+RT_STACK    ?= 53k
+RT_DGROUP_MIN_FREE ?= 128
+RT_LDOPTS   = option quiet, nodefaultlibs, stack=$(RT_STACK)
 RT_SYMS     = $(RT)/libc16.lst $(RT)/libk16.lst
 # Compile one module of the runtime build: wcc's output goes to the
 # module's .err file, shown only if the compile fails, and that file is
@@ -153,24 +161,52 @@ rt: $(RT)/PERL.EXE
 # The runtime build's tests: the same smoke and installation tests, in
 # their own work directories, and EXECLTST.EXE; then tests/smoke-rt,
 # its own cases (system() with %ENV, #22, with TAILTST.EXE; numeric
-# comparisons, #16, with FPCTST.EXE).
+# comparisons, #16, with FPCTST.EXE; the INT 24h handler and the ctype
+# table, #17, with HARDTST.EXE and CTYPETST.EXE).
 test-rt: $(RT)/PERL.EXE $(TEST_TOOLS) $(RT)/EXECLTST.EXE $(DEV)/TAILTST.EXE \
-  $(RT)/FPCTST.EXE
+  $(RT)/FPCTST.EXE $(RT)/HARDTST.EXE $(RT)/CTYPETST.EXE
 	WORK=build/run-dos-rt BUILD=rt perl tests/run-dos $(RT)/PERL.EXE tests/smoke
 	WORK=build/run-dos-rt2 BUILD=rt \
-	  FILES="$(DEV)/TAILTST.EXE $(RT)/FPCTST.EXE" perl tests/run-dos \
-	  $(RT)/PERL.EXE tests/smoke-rt
+	  FILES="$(DEV)/TAILTST.EXE $(RT)/FPCTST.EXE $(RT)/HARDTST.EXE \
+	  $(RT)/CTYPETST.EXE" \
+	  perl tests/run-dos $(RT)/PERL.EXE tests/smoke-rt
 	WORK=build/run-install-rt perl tests/run-install $(RT)/PERL.EXE \
 	  $(TEST_TOOLS) $(RT)/EXECLTST.EXE
 
 # A unit test of exec16.c's execl(), which only the runtime build has,
 # linked like it. Never to be published.
 EXECLTST_OBJS = $(RT)/execltst.obj $(RT)/stk16.obj $(RT)/exec16.obj \
-  $(RT)/environ.obj $(RT)/p16init.obj
+  $(RT)/environ.obj $(RT)/p16init.obj $(RT)/harderr.obj
 
 $(RT)/EXECLTST.EXE: $(EXECLTST_OBJS) $(LIBC16L) $(LIBK16L) $(TOOLS_ENV)
 	$(WATCOM_ENV) && wlink $(RT_LDOPTS) format dos name $@ \
 	  $(EXECLTST_OBJS:%=file %) library $(LIBK16L) library $(LIBC16L)
+
+# CTYPETST.EXE: ctype16.h's macros against libc16's functions (#17).
+CTYPETST_OBJS = $(RT)/ctypetst.obj $(RT)/stk16.obj $(RT)/ctype16.obj
+
+$(RT)/CTYPETST.EXE: $(CTYPETST_OBJS) $(LIBC16L) $(LIBK16L) $(TOOLS_ENV)
+	$(WATCOM_ENV) && wlink $(RT_LDOPTS) format dos name $@ \
+	  $(CTYPETST_OBJS:%=file %) library $(LIBK16L) library $(LIBC16L)
+
+$(RT)/ctypetst.obj: tests/tools/ctypetst.c $(P16_HEADERS) $(RT_SYMS) \
+  $(TOOLS_ENV) scripts/check-w131 Makefile
+	@echo "$(CC) $(RT_CFLAGS) -fo=$@ $<"
+	@$(RT_COMPILE)
+
+# HARDTST.EXE, a unit test of the INT 24h handler (#17), started like
+# PERL.EXE (p16init.obj installs the handler).
+HARDTST_OBJS = $(RT)/hardtst.obj $(RT)/stk16.obj $(RT)/harderr.obj \
+  $(RT)/environ.obj $(RT)/p16init.obj
+
+$(RT)/HARDTST.EXE: $(HARDTST_OBJS) $(LIBC16L) $(LIBK16L) $(TOOLS_ENV)
+	$(WATCOM_ENV) && wlink $(RT_LDOPTS) format dos name $@ \
+	  $(HARDTST_OBJS:%=file %) library $(LIBK16L) library $(LIBC16L)
+
+$(RT)/hardtst.obj: tests/tools/hardtst.c $(P16_HEADERS) $(RT_SYMS) \
+  $(TOOLS_ENV) scripts/check-w131 Makefile
+	@echo "$(CC) $(RT_CFLAGS) -fo=$@ $<"
+	@$(RT_COMPILE)
 
 # FPCTST.EXE, the C layer of tests/smoke-rt/fpcmp.pl (#16): the
 # compiler's comparisons and p16fp.h's, compiled like the runtime build.
@@ -190,13 +226,16 @@ $(RT)/execltst.obj: tests/tools/execltst.c $(P16_HEADERS) $(RT_SYMS) \
 	@echo "$(CC) $(RT_CFLAGS) -fo=$@ $<"
 	@$(RT_COMPILE)
 
-# No check-dgroup: libc16's large-model heap grows the program's memory
-# block above the stack, outside DGROUP, so DGROUP_MIN_FREE (Open
-# Watcom's near heap for children) doesn't apply. #17 sizes the stack.
-$(RT)/PERL.EXE: $(RT_OBJS) $(LIBC16L) $(LIBK16L) $(TOOLS_ENV) Makefile
+# check-dgroup with RT_DGROUP_MIN_FREE, not DGROUP_MIN_FREE: libc16's
+# large-model heap grows the program's memory block above the stack,
+# outside DGROUP, and a child needs none of DGROUP (Open Watcom's spawn
+# needed near heap).
+$(RT)/PERL.EXE: $(RT_OBJS) $(LIBC16L) $(LIBK16L) $(TOOLS_ENV) \
+  scripts/check-dgroup Makefile
 	$(WATCOM_ENV) && wlink $(RT_LDOPTS), map=$(RT)/perl.map \
 	  format dos name $@.tmp $(RT_OBJS:%=file %) \
 	  library $(LIBK16L) library $(LIBC16L)
+	perl scripts/check-dgroup $(RT)/perl.map $(RT_DGROUP_MIN_FREE)
 	mv $@.tmp $@
 
 # The libraries' symbols, for scripts/check-w131.

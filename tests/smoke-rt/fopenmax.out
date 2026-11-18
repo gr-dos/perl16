@@ -1,0 +1,9 @@
+open 1: ok
+open 2: ok
+open 3: ok
+open 4: ok
+open 5: ok
+open 6: Too many open files
+after closing 5, open 6: ok
+with STDERR duplicated, open 4: Too many open files
+STDERR closed, open 4: ok

@@ -60,6 +60,8 @@ the procedure for changing the pin.
 | `msdos/p16rt.h` | force-included in every module: the library prototypes in the runtime build, and `P16_CB`, the callback convention (M3.4) |
 | `msdos/environ.c`, `environ.h`, `msdos/exec16.c`, `msdos/p16init.asm` | `environ` and the `exec` family, which libc16 doesn't have; runtime build only (M3.4) |
 | `msdos/p16fp.c`, `p16fp.h` | numeric tests `wcc -fpc` gets wrong: a zero the compiler can't see, and `>` and `>=` false with a NaN; runtime build only (M3.4, #16) |
+| `msdos/harderr.c`, `harderr.h` | the INT 24h handler: fail the call, never prompt, and say why in `$!`; runtime build only (M3.4, #17) |
+| `msdos/ctype16.c`, `ctype16.h` | `<ctype.h>`'s classification as table macros, from libc16's spec; runtime build only (M3.4, #17) |
 | `msdos/sswitch.c`, `msdos/brk16.asm` | running Perl on a stack segment of its own (SS != DS); M1 experiment, not in the default build |
 | `scripts/audit-include/*` | audit-only stand-ins for what libc16's and libkitchen16's headers lack, used by `scripts/audit-libc16` and never by the build; written from ISO C and POSIX (their `README`; docs/M3-RUNTIME-AUDIT.md, section 2) |
 | `scripts/fetch-libc16`, `scripts/fetch-libkitchen16` | copies of libc16's and libkitchen16's `consumers/` fetch scripts (MIT), set to the pinned releases: libc16 0.15 and libkitchen16 0.02, each checked by its release's SHA-256 |

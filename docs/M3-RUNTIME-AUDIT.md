@@ -1165,6 +1165,114 @@ exits with `P16EXIT`:
   `p16_gt` and `p16_ge` as the development build has them). The one
   new external is `do_sprintf`'s `snprintf`, from libkitchen16.
 
+**#17's remaining items.**
+- **INT 24h** (section 10). `msdos/harderr.c`'s handler is installed
+  before `main`: `p16init.asm` puts `perl16_harderr_init` in libc16's
+  init table, beside `environ`'s set-up. The handler:
+  - never prompts. It records the drive (or a character device's name
+    from its header) and DOS's error code, and returns
+    `_HARDERR_FAIL`, so the call fails with DOS error 83, which libc16
+    maps to `EACCES`;
+  - runs on `_harderr`'s own stack, so it is compiled without the stack
+    check (`stk16.asm` would see SP below Perl's stack);
+  - calls no DOS function.
+
+  `msdos/p16rt.h` makes `strerror` `p16_strerror`, so `$!` and Perl's
+  own "Can't open" messages read, for example, "Permission denied
+  (drive A: not ready)". It adds that only when DOS's last error (INT
+  21h function 59h) is 83, so a later, unrelated `EACCES` gets no stale
+  explanation.
+
+  DOSBox-X never raises INT 24h, so `HARDTST.EXE`, started like
+  `PERL.EXE`, raises it itself with DOS's registers, as tico16's test
+  does. It covers a drive not ready, a write-protected one, an unknown
+  code, and PRN out of paper. Each gets Fail and the right description,
+  and `strerror(EACCES)` adds nothing otherwise
+  (`tests/smoke-rt/harderr.pl`). The Perl-level path, a real DOS call
+  failing through the handler, can't be raised under DOSBox-X.
+- **The stack** (section 7.6). libc16's heap is outside `DGROUP`, and a
+  child needs none of it, so `DGROUP_MIN_FREE` doesn't apply. The
+  runtime build's stack is `RT_STACK` = 53 KB: `DGROUP` is 65,312
+  bytes, with 224 free. `check-dgroup` runs on its map with
+  `RT_DGROUP_MIN_FREE` (128), so more static data fails the link.
+  `scripts/stack-probe` gives the deepest recursion that runs; one
+  level more is a reported overflow in every case, never a crash:
+
+  | build | simple | `local()` | string |
+  |---|---|---|---|
+  | development, 51 KB | 149 | 66 | 121 |
+  | runtime, 51 KB | 187 | 91 | 145 |
+  | runtime, 53 KB | 195 | 95 | 151 |
+  | runtime, 51 KB, `STK16_MARGIN` 1 KB | 191 | 93 | 148 |
+  | runtime, 51 KB, `STK16_MARGIN` 512 | 193 | 94 | 150 |
+  | runtime as built here (53 KB, with `ctype16.h`) | 206 | 103 | 158 |
+
+  `STK16_MARGIN` stays 2 KB. A smaller one buys 4 to 6 levels, and the
+  probe doesn't reach the libraries' deepest stack use below a checked
+  frame (libkitchen16's `snprintf`, 530 bytes). The runtime build's
+  frames are smaller than the development build's, so the same stack
+  goes about 25% deeper; the variants above were built before
+  `ctype16.h`, and the build as it is now goes deeper still.
+- **`<ctype.h>`** (section 7.1). `msdos/ctype16.h`, included by
+  `p16rt.h` after `<ctype.h>`, makes the twelve classification tests
+  lookups in a 256-byte table generated from libc16's spec. The table
+  is `const`, so `-zc` puts it in the code segment. `CTYPETST.EXE`
+  checks each macro against libc16's function for every value from
+  `EOF` to 255 (3,084 checks, `tests/smoke-rt/ctype16.pl`).
+- **Output buffering** (section 6.5). libc16's output is unbuffered,
+  so each `print` item is a DOS write.
+- **Benchmark.** `scripts/bench LIBC=1` adds two workloads: `print`
+  (2,000 lines of four items to a file) and `ctype` (`\w`, `\s` and
+  `\d` matching over 1 KB, 30 times, and an `eval` of a 4 KB script).
+  Emulated seconds at 315 cycles per millisecond:
+
+  | seconds | arith | string | regex | hash | subs | read | bigint | print | ctype |
+  |---|---|---|---|---|---|---|---|---|---|
+  | development | 18.6 | 9.2 | 9.3 | 13.7 | 14.4 | 10.0 | 158.3 | 39.4 | 53.5 |
+  | runtime, libc16's functions | 40.4 | 12.1 | 12.0 | 23.2 | 18.2 | 18.9 | 194.3 | 59.7 | 135.9 |
+  | runtime, `ctype16.h` | 40.4 | 12.1 | 11.4 | 23.1 | 18.2 | 18.8 | 192.8 | 59.7 | 131.1 |
+
+  - The table saves 4–5% where the tokenizer and regex engine run
+    (`ctype`, `regex`) and costs no `DGROUP`, so it stays. Most of
+    `ctype`'s gap to the development build is elsewhere, and not
+    measured yet.
+  - `print` is half again as slow as the development build. That is
+    8,000 DOS writes for 48,890 bytes, about 2.5 ms each over a
+    buffered runtime. Buffered output belongs in libc16 (section 6.5).
+    It would need flushing at exit, on `fclose`, before a seek and
+    before a child runs; line buffering for devices; and buffers that
+    don't come out of `DGROUP`. A proposal to libc16 with these figures
+    is drafted, not yet filed. perl16 is correct without it.
+- **The memory a child gets** (section 7.7). `scripts/child-mem` runs
+  `FREEMEM.EXE` from the command line (622,240 bytes free under
+  DOSBox-X) and through `system` at three points in one script:
+
+  | bytes free for a child | at the start | holding 100 KB of strings | after freeing them |
+  |---|---|---|---|
+  | development (M2) | 278,624 | 139,328 | 139,328 |
+  | runtime, 51 KB stack | 296,944 | 159,840 | 159,840 |
+  | runtime as built here | 297,616 | 160,512 | 160,512 |
+
+  The runtime build leaves a child 18–20 KB more: a smaller image and
+  no near heap. Neither gives freed memory back to DOS (libc16's heap
+  keeps the grown block), so a child gets least after Perl's largest
+  use, as in M2. A second `PERL.EXE` still doesn't fit (DOS error 8).
+- **`FOPEN_MAX`** (section 6.5). libc16 has 8 streams, `STDIN`,
+  `STDOUT` and `STDERR` among them. `tests/smoke/fopen5.pl`, in both
+  builds, writes and then reads five files, all open at once.
+  `tests/smoke-rt/fopenmax.pl` shows the limit: a sixth file fails
+  cleanly with "Too many open files", and opens once another is
+  closed. An `open(STDERR, ">&STDOUT")` takes a stream of its own
+  until it is closed. Open Watcom's runtime has 20.
+
+**Tests, 2026-11-18, #17's remaining items.**
+- `make test`: 24 passed (`fopen5` new), `fpfmt` todo; 35 of 35 install
+  cases.
+- `make test-rt`: 25 of 25 smoke, 7 of 7 `smoke-rt` (`harderr`,
+  `ctype16` and `fopenmax` new), 36 of 36 install.
+- `make test-t-rt`: 53 of 72, the baseline.
+- `make audit`: all 25 sources compile.
+
 
 ## 12. Issue breakdown
 
@@ -1179,7 +1287,7 @@ below, and its detail is the section of this document it cites.
 | [gr-dos/libc16#22](https://github.com/gr-dos/libc16/issues/22) | small C89 and Microsoft C functions for perl16 | sections 6.2–6.7: `atexit`; `time`, `gmtime`; `rand`, `srand`; `isatty`, `dup`, `dup2`, `fdopen`, `rmdir`, `strupr` | M3.2 | done in [libc16#23](https://github.com/gr-dos/libc16/pull/23), 0.08 |
 | [#15](https://github.com/gr-dos/perl16/issues/15) | M3.3: create gr-dos/libkitchen16 | section 11: `fpc`, `fmt`, `fmtio`, `conv`, `math` | M3.3 | implemented in [libkitchen16#1](https://github.com/gr-dos/libkitchen16/pull/1), released in 0.01 (now 0.02); `fpfmt` passes in the runtime build, which `make test-rt` requires: done |
 | [#16](https://github.com/gr-dos/perl16/issues/16) | M3.4: perl16 sources against libc16's headers | section 5.3, 7.9, 7.10: declarations and includes, `__cdecl` callbacks, `<stdarg.h>`, `stdaux`/`stdprn`, `_hdopen`, `RANDBITS` | M3.4 | done: the runtime build (section 11.7), with `-wx`, `RANDBITS`, `snprintf`, the `-fpc` comparisons and `t/` under it last |
-| [#17](https://github.com/gr-dos/perl16/issues/17) | M3.4: perl16's DOS shims for libc16 | sections 6.2–6.6, 7.1, 7.5–7.7, 10: `environ`, `exec` emulation, the piped-open temporary file, `stk16.asm` on `_end`, the INT 24h handler, the ctype and stream-buffering measurements | M3.4 | open |
+| [#17](https://github.com/gr-dos/perl16/issues/17) | M3.4: perl16's DOS shims for libc16 | sections 6.2–6.6, 7.1, 7.5–7.7, 10: `environ`, `exec` emulation, the piped-open temporary file, `stk16.asm` on `_end`, the INT 24h handler, the ctype and stream-buffering measurements | M3.4 | done: the runtime build (section 11.7), with the INT 24h handler, the stack, the ctype table and the measurements last |
 
 The libkitchen16 issue was opened in perl16 because the repository did
 not exist yet. M3.3 has since created it (section 11.5), and its own
