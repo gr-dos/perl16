@@ -48,11 +48,19 @@ made libc16 0.12's heap slow (docs/M3-RUNTIME-AUDIT.md, section 11.7):
   temps     200 rounds of split and join over 60 fields
   recurse   tests/smoke/recurse: 120 calls deep, 50 with local(), fib(15)
 
+With LIBC=1, two workloads follow for libc16's choices that the others
+hardly touch (#17; docs/M3-RUNTIME-AUDIT.md, sections 6.5 and 7.1):
+
+  print     2,000 lines to a file, a print of four items each: every
+            item is a DOS write with libc16's unbuffered output
+  ctype     <ctype.h> functions, far calls in libc16: 30 passes of \w, \s
+            and \d matching over 1 KB of words, and eval of a 4 KB script
+
 A result is checked against the workload's expected last line; a run
 that fails, or takes more than TIMEOUT seconds, prints FAIL.
 
 Environment: DOSBOX, WORK (default build/bench), CYCLES (default 315),
-ALLOC=1 for the allocation workloads, TIMEOUT seconds of real time per
+ALLOC=1 for the allocation workloads, LIBC=1 for print and ctype, TIMEOUT seconds of real time per
 run (default 600).
 
 =cut
@@ -102,9 +110,15 @@ my %LOAD = (
     recurse => ['sub d { &d($_[0] + 1) if $_[0] < 120; $_[0]; } sub f { local($n) = @_; $n >= 50 ? 0 : 1 + &f($n + 1); }'
               . ' sub fib { local($n) = @_; $n < 2 ? $n : &fib($n - 1) + &fib($n - 2); }'
               . ' print "recurse ", &d(0), " ", &f(0), " ", &fib(15), "\n";', qr/^recurse 0 50 610$/m],
+    print   => [q{open(F, ">P.TMP"); for ($i = 0; $i < 2000; $i++) { print F "line ", $i, " of the output", "\n"; } close(F);}
+              . q{ print "print ", -s "P.TMP", "\n"; unlink("P.TMP");}, qr/^print 48890$/m],
+    ctype   => [q{$s = "word 123 another_word 456 " x 40;}
+              . q{ for ($i = 0; $i < 30; $i++) { $t = $s; $n = 0; while ($t =~ s/^\s*(\w+)\s+(\d+)\s+//) { $n++; } }}
+              . q{ eval('$x = $y + 12345 * $z; ' x 160); print "ctype $n\n";}, qr/^ctype 80$/m],
 );
 my @order = qw(startup arith string regex hash subs read bigint);
 push @order, qw(hash1500 grow temps recurse) if $ENV{ALLOC};
+push @order, qw(print ctype) if $ENV{LIBC};
 for my $l (@order) {
     next unless defined $LOAD{$l}[0];
     open my $f, '>', "$work/T/\U$l\E.PL";
