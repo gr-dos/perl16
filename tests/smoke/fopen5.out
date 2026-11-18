@@ -1,0 +1,20 @@
+file 5 line 1
+file 4 line 1
+file 3 line 1
+file 2 line 1
+file 1 line 1
+file 5 line 2
+file 4 line 2
+file 3 line 2
+file 2 line 2
+file 1 line 2
+file 5 line 3
+file 4 line 3
+file 3 line 3
+file 2 line 3
+file 1 line 3
+file 1 at eof: yes
+file 2 at eof: yes
+file 3 at eof: yes
+file 4 at eof: yes
+file 5 at eof: yes
