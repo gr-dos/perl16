@@ -775,13 +775,21 @@ What this means for perl16:
   (`libkitchen16-0.01.zip.sha256`). It was built against libc16 0.07.
   perl16 will pin libc16 0.12, so M3.4 must check that the two work
   together: libkitchen16 uses libc16's `errno` and `FILE` output.
-- **Larger than budgeted.** The size reports from its sessions (small
-  model, not re-measured) are about 6 KB for `fmt`, 3.3 KB for
-  `strtod` and `atof`, and about 11 KB for `pow` with its shared
-  kernels. So what perl16 links is likely to be well above section
-  11.4's 9–14 KB estimate. It is still under the 65 KB of Open Watcom
-  runtime it replaces. M3.4 measures the real figure from `PERL.EXE`'s
-  map.
+- **Larger than budgeted.** libkitchen16's `make size`
+  ([libkitchen16#6](https://github.com/gr-dos/libkitchen16/pull/6))
+  links perl16's set of functions in the large model. That is the
+  helpers, `sprintf`, `vsprintf`, `fprintf`, `atof`, and `atan2 cos exp
+  log modf pow sin sqrt`. They add 30,760 bytes of image and 2,000
+  bytes of DGROUP, about twice section 11.4's 9–14 KB estimate. `pow`
+  alone is 12 KB. That is still under the 65 KB of Open Watcom runtime
+  it replaces. The 2,000 bytes of DGROUP count against perl16's
+  DGROUP margin, so M3.4 measures both from `PERL.EXE`'s map.
+- **Speed.** Its `make bench` uses the same emulated 4.77 MHz 8088 as
+  perl16's `scripts/bench`. An addition takes about 1.1 ms, a
+  division 4.9 ms, `sprintf("%.20g")` (every number Perl prints)
+  27 ms, `atof` 35 ms, `sin` 72 ms and `pow` 0.4 s, in the large model.
+  M3.4 compares perl16's workloads against M2's Open Watcom
+  emulator, and reports slowdowns to libkitchen16.
 - **NaN comparisons.** `__FDC` and `__EDC` report an unordered
   comparison as `a > b`, so `NaN > x` and `NaN >= x` are true
   ([libkitchen16#2](https://github.com/gr-dos/libkitchen16/issues/2)
