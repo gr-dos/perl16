@@ -78,3 +78,8 @@ jobs:
       # EXECLTST.EXE.
       - name: Test
         run: make test-rt
+
+      # Perl 3.044's t/ suite against the development build's baseline;
+      # only tests/rt-t-slow.txt's script may time out.
+      - name: Test (t/ suite)
+        run: make test-t-rt

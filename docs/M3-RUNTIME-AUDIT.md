@@ -934,6 +934,12 @@ register-convention call to either library.
     `tests/rt-slow.txt` lets them time out, and only time out, until
     perl16#21 pins the libc16 release that fixes libc16#30.
   - `fpfmt` passes, but is still marked todo.
+- `make test-t-rt`: 52 of 72 `t/` scripts pass, every one the baseline
+  lists as passing except `lib.big`, which passes 246 of 246 but takes
+  about 250 s, past the 120 s limit; `tests/rt-t-slow.txt` lets it time
+  out until libc16#30 is fixed.
+- CI runs `make rt`, `make test-rt` and `make test-t-rt` in a job of
+  their own.
 
 
 ## 12. Issue breakdown

@@ -11,6 +11,7 @@
 #   make test-rt     the smoke and installation tests of build/rt/PERL.EXE
 #   make test-t      Perl 3.044's own t/ suite under DOSBox-X, checked
 #                    against tests/t-baseline.txt (tests/run-t)
+#   make test-t-rt   the same, under build/rt/PERL.EXE
 #   make variants    the M1 experimental builds in build/var (below),
 #                    and FREEMEM.EXE and TICKS.EXE for the probes
 #                    (scripts/build-variant, tests/tools)
@@ -267,6 +268,12 @@ test: $(DEV)/PERL.EXE $(TEST_TOOLS)
 test-t: $(DEV)/PERL.EXE $(UPSTREAM)/.git-tree
 	perl tests/run-t $(DEV)/PERL.EXE $(UPSTREAM) tests/t-baseline.txt
 
+# The t/ suite under the runtime build, against the same baseline, with
+# the scripts tests/rt-t-slow.txt lists allowed to time out.
+test-t-rt: $(RT)/PERL.EXE $(UPSTREAM)/.git-tree
+	WORK=build/run-t-rt SLOW=tests/rt-t-slow.txt perl tests/run-t \
+	  $(RT)/PERL.EXE $(UPSTREAM) tests/t-baseline.txt
+
 audit: $(DEV_OBJS) $(LIBC16L) $(LIBK16L) $(TOOLS_ENV) scripts/audit-libc16
 	mkdir -p build/audit build/audit/libc16
 	$(WATCOM_ENV) && perl scripts/audit-externals build/audit $(LIBC16L) \
@@ -287,4 +294,4 @@ clean:
 # The assembled sources are made by one rule; make must not delete them.
 .SECONDARY:
 
-.PHONY: all rt test test-rt test-t variants measure audit reference clean
+.PHONY: all rt test test-rt test-t test-t-rt variants measure audit reference clean

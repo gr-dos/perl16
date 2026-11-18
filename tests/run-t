@@ -37,8 +37,16 @@ C<NAME fail REASON>), exits 1 if a script listed as C<pass> no longer
 passes, and reports scripts that pass but are listed as C<fail>. With
 C<UPDATE=1> it rewrites BASELINE from this run instead.
 
+A build can have slow scripts of its own. SLOW names a file of them,
+one per line as C<NAME REASON> (blank lines and C<#> comments ignored).
+A listed script that times out is reported as slow, not as a
+regression; one that fails in any other way is a regression as usual,
+and one that passes is reported, so the entry can be removed. A name
+that isn't a script is an error.
+
 Environment: DOSBOX, DOSBOX_TIMEOUT seconds per script (default 120),
-WORK (default build/run-t), KEEP=1 to keep the work directory.
+WORK (default build/run-t), KEEP=1 to keep the work directory, SLOW the
+file of slow scripts.
 
 =cut
 
@@ -131,6 +139,22 @@ say for @lines;
 my $npass = grep { $_->[0] eq 'pass' } values %result;
 say "run-t: $npass of " . @cases . " scripts pass";
 
+my %slow;
+if (my $file = $ENV{SLOW}) {
+    for (split /\n/, slurp($file)) {
+        next if /^\s*(#|$)/;
+        my ($name, $why) = /^(\S+)\s+(.+?)\s*$/
+            or die "$file: not NAME REASON: $_\n";
+        die "$file: $name is not a script\n" unless $result{$name};
+        $slow{$name} = $why;
+        if ($result{$name}[0] eq 'pass') {
+            say "run-t: $name passes, but is listed as slow in $file ($why)";
+        } elsif ($result{$name}[1] eq 'timed out') {
+            say "run-t: $name: slow: $why (timed out after ${timeout}s)";
+        }
+    }
+}
+
 my $bad = 0;
 if ($baseline && $ENV{UPDATE}) {
     open my $b, '>', $baseline;
@@ -148,7 +172,8 @@ if ($baseline && $ENV{UPDATE}) {
         next if /^#/ || !/\S/;
         my ($name, $want) = split;
         my $got = $result{$name} or do { say "run-t: $name: in the baseline, not in t/"; $bad++; next };
-        if ($want eq 'pass' && $got->[0] ne 'pass') {
+        if ($want eq 'pass' && $got->[0] ne 'pass'
+            && !($slow{$name} && $got->[1] eq 'timed out')) {
             say "run-t: REGRESSION: $name ($got->[1])";
             $bad++;
         } elsif ($want ne 'pass' && $got->[0] eq 'pass') {
