@@ -744,10 +744,12 @@ is well under the 65 KB of Open Watcom runtime they replace.
 
 ### 11.5 Status
 
-As of 2026-11-18, `gr-dos/libkitchen16` exists and its first
+As of 2026-11-18, `gr-dos/libkitchen16` exists. Its first
 implementation is merged
 ([libkitchen16#1](https://github.com/gr-dos/libkitchen16/pull/1),
-`d36fac5`). It follows sections 11.2 and 11.3:
+`d36fac5`) and released as
+[0.01](https://github.com/gr-dos/libkitchen16/releases/tag/v0.01). It
+follows sections 11.2 and 11.3:
 
 - **Modules.** `fpc` (the 17 helpers of section 11.2, in the small,
   compact and large models), `fmt`, `fmtio`, `conv` and `math` (all of
@@ -759,8 +761,8 @@ implementation is merged
   are within 4 ulps, and `pow` is exact for integer exponents.
 - **Provenance.** Each module's spec and tests came first. A separate
   session wrote each module's code without `src/` or history. Its
-  similarity audit puts no member over 0.50; the highest is 0.38.
-  Human review of the provenance is still pending.
+  similarity audit puts no member over 0.50; the highest is 0.38. The
+  maintainer reviewed the provenance on 2026-11-18.
 - **Tests.** `make test` passes 213 checks in each model. The checks
   include DOSBox-X `cputype=8086` runs against host-oracle corpora and
   measured stack depths: `snprintf` uses at most 530 bytes and `pow` at
@@ -768,9 +770,11 @@ implementation is merged
 
 What this means for perl16:
 
-- **Not released yet.** libkitchen16 0.01's pin still has a
-  placeholder SHA-256, so perl16 cannot pin it until the release is
-  published.
+- **Release 0.01.** The pin is `version=0.01`,
+  `sha256=0c3b27f9de469a6a7071bb27adde191484ccd5bde31c72a6e523afc9e4918379`
+  (`libkitchen16-0.01.zip.sha256`). It was built against libc16 0.07.
+  perl16 will pin libc16 0.12, so M3.4 must check that the two work
+  together: libkitchen16 uses libc16's `errno` and `FILE` output.
 - **Larger than budgeted.** The size reports from its sessions (small
   model, not re-measured) are about 6 KB for `fmt`, 3.3 KB for
   `strtod` and `atof`, and about 11 KB for `pow` with its shared
@@ -799,7 +803,7 @@ below, and its detail is the section of this document it cites.
 | [gr-dos/libc16#20](https://github.com/gr-dos/libc16/issues/20) | system, the spawn family and getpid | section 6.6: `system`, `spawnv`, `spawnve`, `spawnvp`, `spawnvpe`, `spawnl` (`P_WAIT`), `getpid` | M3.2 | done in [libc16#25](https://github.com/gr-dos/libc16/pull/25), 0.10 |
 | [gr-dos/libc16#21](https://github.com/gr-dos/libc16/issues/21) | signal and raise (C89 7.7), SIGINT through INT 23h | sections 6.6, 7.4 | M3.2 | done in [libc16#26](https://github.com/gr-dos/libc16/pull/26), 0.11 |
 | [gr-dos/libc16#22](https://github.com/gr-dos/libc16/issues/22) | small C89 and Microsoft C functions for perl16 | sections 6.2–6.7: `atexit`; `time`, `gmtime`; `rand`, `srand`; `isatty`, `dup`, `dup2`, `fdopen`, `rmdir`, `strupr` | M3.2 | done in [libc16#23](https://github.com/gr-dos/libc16/pull/23), 0.08 |
-| [#15](https://github.com/gr-dos/perl16/issues/15) | M3.3: create gr-dos/libkitchen16 | section 11: `fpc`, `fmt`, `fmtio`, `conv`, `math` | M3.3 | in progress: implemented in [libkitchen16#1](https://github.com/gr-dos/libkitchen16/pull/1), not yet released |
+| [#15](https://github.com/gr-dos/perl16/issues/15) | M3.3: create gr-dos/libkitchen16 | section 11: `fpc`, `fmt`, `fmtio`, `conv`, `math` | M3.3 | implemented in [libkitchen16#1](https://github.com/gr-dos/libkitchen16/pull/1), released in 0.01; `fpfmt` still to run |
 | [#16](https://github.com/gr-dos/perl16/issues/16) | M3.4: perl16 sources against libc16's headers | section 5.3, 7.9, 7.10: declarations and includes, `__cdecl` callbacks, `<stdarg.h>`, `stdaux`/`stdprn`, `_hdopen`, `RANDBITS` | M3.4 | open |
 | [#17](https://github.com/gr-dos/perl16/issues/17) | M3.4: perl16's DOS shims for libc16 | sections 6.2–6.6, 7.1, 7.5–7.7, 10: `environ`, `exec` emulation, the piped-open temporary file, `stk16.asm` on `_end`, the INT 24h handler, the ctype and stream-buffering measurements | M3.4 | open |
 
