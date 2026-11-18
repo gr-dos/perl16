@@ -1241,8 +1241,8 @@ exits with `P16EXIT`:
     buffered runtime. Buffered output belongs in libc16 (section 6.5).
     It would need flushing at exit, on `fclose`, before a seek and
     before a child runs; line buffering for devices; and buffers that
-    don't come out of `DGROUP`. A proposal to libc16 with these figures
-    is drafted, not yet filed. perl16 is correct without it.
+    don't come out of `DGROUP`. It is proposed to libc16 with these
+    figures in gr-dos/libc16#34. perl16 is correct without it.
 - **The memory a child gets** (section 7.7). `scripts/child-mem` runs
   `FREEMEM.EXE` from the command line (622,240 bytes free under
   DOSBox-X) and through `system` at three points in one script:
