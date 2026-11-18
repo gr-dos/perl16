@@ -91,6 +91,8 @@ try the next directory.
 - **Recursion.** About 150 levels of a simple recursive sub, or 65 with
   `local()`, before `Stack overflow` (M2-REPORT.md, section 4). Perl
   guarantees 120 and 50 in its tests.
+  The runtime build (`make rt`, M3.4) goes deeper: about 205, or 100
+  with `local()`.
 - **Strings, arrays and hash tables.** One string, or the pointer table
   of one array, is limited to 64 KB, as in any large-model DOS program.
   A hash's table stops growing at 8,192 buckets. More keys still work,
@@ -109,6 +111,17 @@ try the next directory.
 Files are opened in text mode: `CR LF` reads as `\n`, and `\n` is
 written as `CR LF`. Use `binmode(FH)` for binary data. `-s` gives the
 size on disk, `CR`s included.
+
+- **Open files.** In the runtime build, five files can be open at
+  once beside `STDIN`, `STDOUT` and `STDERR` (libc16's `FOPEN_MAX` is
+  8). Another `open` fails with "Too many open files" until one is
+  closed. A duplicated handle such as `open(STDERR, ">&STDOUT")` counts
+  while it is open. The development build allows about 20.
+- **Disk and printer errors.** In the runtime build, a drive that isn't
+  ready, a write-protected disk or a printer out of paper never stops
+  Perl with DOS's "Abort, Retry, Fail?". The call fails, and `$!` says
+  why: "Permission denied (drive A: not ready)". The development
+  build leaves DOS's prompt in place.
 
 ## Globbing
 
