@@ -27,6 +27,7 @@ is turned into LF. Comment lines at the top of the script can say:
 
   # status: N        the expected exit status (default 0)
   # command: ARGS    run PERL ARGS instead of PERL NAME.PL
+  # setup: LINE      a batch line run before PERL (any number of them)
   # todo: REASON     a known failure: reported, but not counted as one
 
 Any other file in DIR is a fixture, copied into the work directory
@@ -51,7 +52,8 @@ entry can be removed. A name that isn't a case is an error.
 
 Environment: DOSBOX (default dosbox-x), DOSBOX_TIMEOUT seconds per case
 (default 60), WORK (default build/run-dos) the work directory, KEEP=1 to
-keep it, SLOW the file of slow cases.
+keep it, SLOW the file of slow cases, FILES more fixtures (paths
+separated by spaces, such as built test tools), copied like the others.
 
 =cut
 
@@ -72,12 +74,13 @@ for my $dir (@dirs) {
         die "$pl: name longer than 8 characters\n" if length $name > 8;
         die "$pl: $name is used twice\n" if $seen{$name}++;
         my %case = (name => $name, file => $pl, status => 0,
-                    command => "PERL $name.PL");
+                    command => "PERL $name.PL", setup => []);
         for (split /\n/, slurp($pl)) {
             last unless /^#/;
             $case{status}  = $1 if /^#\s*status:\s*(\d+)/;
             $case{command} = "PERL $1" if /^#\s*command:\s*(.+?)\s*$/;
             $case{todo}    = $1 if /^#\s*todo:\s*(.+?)\s*$/;
+            push @{ $case{setup} }, $1 if /^#\s*setup:\s*(.+?)\s*$/;
         }
         (my $exp = $pl) =~ s/\.pl$/.out/;
         die "$pl: no $exp\n" unless -f $exp;
@@ -109,6 +112,12 @@ for my $dir (@dirs) {
     }
 }
 
+for my $f (split ' ', $ENV{FILES} // '') {
+    my $name = uc basename($f);
+    die "$f: $name is used twice\n" if $seen{$name}++;
+    copy($f, "$work/$name") or die "copy $f: $!\n";
+}
+
 # Each case runs in its own DOSBox-X session, so one that hangs is
 # killed after DOSBOX_TIMEOUT seconds without stopping the others. Its
 # exit status N passes when errorlevel >= N and not >= N + 1.
@@ -116,7 +125,7 @@ write_config($work);
 
 for my $c (@cases) {
     my ($n, $st) = @$c{qw(name status)};
-    my @bat = ('@echo off', "$c->{command} >$n.OUT");
+    my @bat = ('@echo off', @{ $c->{setup} }, "$c->{command} >$n.OUT");
     push @bat, sprintf 'if errorlevel %d goto f', $st + 1 if $st < 255;
     push @bat, "if not errorlevel $st goto f";
     push @bat, "echo ok >$n.RC", 'goto d', ':f', "echo bad >$n.RC", ':d';
