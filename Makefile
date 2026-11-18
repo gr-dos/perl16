@@ -137,11 +137,9 @@ $(DEV)/%.obj: msdos/%.c $(P16_HEADERS) $(TOOLS_ENV) Makefile
 rt: $(RT)/PERL.EXE
 
 # The runtime build's tests: the same smoke and installation tests, in
-# their own work directories, with the cases tests/rt-slow.txt lists
-# allowed to time out, and EXECLTST.EXE.
+# their own work directories, and EXECLTST.EXE.
 test-rt: $(RT)/PERL.EXE $(TEST_TOOLS) $(RT)/EXECLTST.EXE
-	WORK=build/run-dos-rt SLOW=tests/rt-slow.txt perl tests/run-dos \
-	  $(RT)/PERL.EXE tests/smoke
+	WORK=build/run-dos-rt perl tests/run-dos $(RT)/PERL.EXE tests/smoke
 	WORK=build/run-install-rt perl tests/run-install $(RT)/PERL.EXE \
 	  $(TEST_TOOLS) $(RT)/EXECLTST.EXE
 
@@ -272,11 +270,10 @@ test: $(DEV)/PERL.EXE $(TEST_TOOLS)
 test-t: $(DEV)/PERL.EXE $(UPSTREAM)/.git-tree
 	perl tests/run-t $(DEV)/PERL.EXE $(UPSTREAM) tests/t-baseline.txt
 
-# The t/ suite under the runtime build, against the same baseline, with
-# the scripts tests/rt-t-slow.txt lists allowed to time out.
+# The t/ suite under the runtime build, against the same baseline.
 test-t-rt: $(RT)/PERL.EXE $(UPSTREAM)/.git-tree
-	WORK=build/run-t-rt SLOW=tests/rt-t-slow.txt perl tests/run-t \
-	  $(RT)/PERL.EXE $(UPSTREAM) tests/t-baseline.txt
+	WORK=build/run-t-rt perl tests/run-t $(RT)/PERL.EXE $(UPSTREAM) \
+	  tests/t-baseline.txt
 
 audit: $(DEV_OBJS) $(LIBC16L) $(LIBK16L) $(TOOLS_ENV) scripts/audit-libc16
 	mkdir -p build/audit build/audit/libc16

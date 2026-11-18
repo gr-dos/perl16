@@ -52,9 +52,8 @@ jobs:
           cat build/audit/libc16/report.txt
 
   # The runtime build (M3.4): PERL.EXE linked with libc16 and
-  # libkitchen16 instead of Open Watcom's runtime. A build failure, a
-  # failed smoke or installation case, or a case in tests/rt-slow.txt
-  # failing in any way but a timeout makes it fail.
+  # libkitchen16 instead of Open Watcom's runtime. A build failure or a
+  # failed smoke, installation or t/ case makes it fail.
   runtime:
     runs-on: ubuntu-24.04
     steps:
@@ -73,13 +72,10 @@ jobs:
       - name: Build
         run: make rt
 
-      # Smoke tests, with tests/rt-slow.txt's cases (libc16#30's slow
-      # heap) allowed to time out, then the installation tests and
-      # EXECLTST.EXE.
+      # Smoke tests, then the installation tests and EXECLTST.EXE.
       - name: Test
         run: make test-rt
 
-      # Perl 3.044's t/ suite against the development build's baseline;
-      # only tests/rt-t-slow.txt's script may time out.
+      # Perl 3.044's t/ suite against the development build's baseline.
       - name: Test (t/ suite)
         run: make test-t-rt

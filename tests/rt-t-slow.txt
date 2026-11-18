@@ -1,6 +1,0 @@
-# t/ scripts the runtime build (make test-t-rt) is allowed to time out
-# on: tests/run-t's SLOW. Each passes, but libc16's heap is quadratic in
-# its free blocks (docs/M3-RUNTIME-AUDIT.md, section 11.7;
-# gr-dos/libc16#30). Remove it when perl16#21 pins the libc16 release
-# with the fix (0.14). Any other failure is still a regression.
-lib.big  libc16#30: passes 246/246, but takes about 250 s
