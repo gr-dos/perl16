@@ -11,8 +11,8 @@ Measured on 2026-11-17 with:
 
 - Open Watcom 2026-10-01-Build, the snapshot both libc16 0.04 and 0.07 pin;
 - libc16 0.07 (then the latest release, `c23f0c7`), pinned at the time in
-  `scripts/fetch-libc16` (perl16 now pins libc16 0.12 and libkitchen16
-  0.02: section 11.6);
+  `scripts/fetch-libc16` (perl16 now pins libc16 0.14 and libkitchen16
+  0.02: sections 11.6 and 11.7);
 - Perl 3.044 plus `patches/0001`–`0008`, as at the M2 merge (`51df9eb`).
 
 Section 13 has the commands that reproduce every number.
@@ -778,10 +778,10 @@ What this means for perl16:
 - **Release 0.02** (0.01 was the first). The pin is `version=0.02`,
   `sha256=2ca356b7d2a23442b7851b10c09cfa577ee3888eaf5b4b899f10ee494162cb85`
   (`libkitchen16-0.02.zip.sha256`). It was built against libc16 0.07.
-  perl16 pins it with libc16 0.12 (section 11.6), which libkitchen16
-  allows (that version or newer). M3.4, which links them, checks that
-  the two work together: libkitchen16 uses libc16's `errno` and `FILE`
-  output.
+  perl16 pins it with libc16 0.14 (sections 11.6 and 11.7), which
+  libkitchen16 allows (that version or newer). M3.4 links them, and its
+  tests show the two work together: libkitchen16 uses libc16's `errno`
+  and `FILE` output.
 - **Larger than budgeted.** libkitchen16's `make size`
   ([libkitchen16#6](https://github.com/gr-dos/libkitchen16/pull/6))
   links perl16's set of functions in the large model. That is the
@@ -820,7 +820,10 @@ What this means for perl16:
 
 ### 11.6 Pins
 
-perl16 pins **libc16 0.12** (`scripts/fetch-libc16`) and **libkitchen16
+(M3.4 has since moved libc16 to 0.14, for its heap: section 11.7. 0.14's
+headers are 0.12's, so what follows still holds.)
+
+perl16 pinned **libc16 0.12** (`scripts/fetch-libc16`) and **libkitchen16
 0.02** (`scripts/fetch-libkitchen16`, new), each by its release's
 SHA-256. The Makefile fails if the two name different Open Watcom
 snapshots. They name the same one, so `build/dev/PERL.EXE` is unchanged
@@ -860,7 +863,7 @@ libc16's, as libkitchen16's consumers do, and links `LIBK16L.LIB` with
 ### 11.7 The runtime build (M3.4, in progress)
 
 `make rt` builds `build/rt/PERL.EXE`: the same sources compiled against
-libc16 0.12's and libkitchen16 0.02's headers and linked with their
+libc16 0.14's and libkitchen16 0.02's headers and linked with their
 libraries alone (`option nodefaultlibs`), with no Open Watcom runtime.
 `make test-rt` runs the smoke and installation tests on it. The
 development build (`make`, `make test`) is unchanged and still passes.
@@ -911,8 +914,9 @@ register-convention call to either library.
   `system()`, which passes it as it is but with DOS's environment
   rather than `%ENV`. A libc16 way to run `COMSPEC /C` with an
   environment would remove both limits.
-- **libc16's heap is quadratic with many free blocks.** Measured with
-  libc16 alone, on the emulated 8086:
+- **libc16 0.12's heap was quadratic with many free blocks**
+  ([libc16#30](https://github.com/gr-dos/libc16/issues/30); fixed in
+  0.14, below). Measured with libc16 alone, on the emulated 8086:
   - with 2,000 free holes, 2,000 allocations that don't fit them take
     1,123 ticks (62 s);
   - 4,000 growing `realloc`s take 4,099 ticks (225 s);
@@ -926,18 +930,61 @@ register-convention call to either library.
 - **`fpfmt` passes.** libkitchen16's `printf` rounds a tie to even and
   gets the 20th digit right, where Open Watcom's didn't (section 11.5).
 
-**Tests, 2026-11-18 (DOSBox-X 2026.01.02, emulated 8086).**
+**libc16 0.14 (#21).** libc16 0.14
+(`sha256=777693e1…faeaa09`, from its release's `.sha256`) replaces the
+heap with segregated free lists and boundary tags, so a call's time no
+longer grows with the number of blocks (libc16's `docs/spec/heap.md`,
+"Performance"). Its headers are byte for byte 0.12's and it names the
+same Open Watcom snapshot, so nothing in perl16 changed but the pin.
+The link map of the clean rebuild has modules from `LIBC16L.LIB` (107)
+and `LIBK16L.LIB` (36) and none from Open Watcom's runtime.
+
+`scripts/bench` timed the M2 workloads and, with `ALLOC=1`, four
+allocation-heavy ones (`hash1500` is `tests/smoke/hashbig`, `recurse`
+is `tests/smoke/recurse`; `grow` is 3,000 string appends and array
+pushes; `temps` is 200 rounds of `split` and `join` over 60 fields).
+Emulated seconds at 3,150 cycles per millisecond (ten times
+`scripts/bench`'s default, which would leave 0.12's runs at half an
+hour each):
+
+| Build | startup | arith | string | regex | hash | subs | read | bigint | hash1500 | grow | temps | recurse |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| dev (M2) | 0.1 | 1.8 | 0.9 | 0.9 | 1.3 | 1.4 | 1.0 | 15.3 | 5.0 | 2.6 | 8.0 | 6.7 |
+| rt, libc16 0.12 | 0.1 | 3.9 | 3.2 | 1.8 | 17.5 | 3.2 | 2.0 | 235.3 | 79.8 | 134.9 | 33.3 | 96.6 |
+| rt, libc16 0.14 | 0.1 | 3.8 | 1.2 | 1.2 | 2.3 | 1.8 | 1.9 | 18.6 | 8.0 | 3.8 | 8.1 | 7.1 |
+
+- The allocation workloads are 4 to 35 times faster than with 0.12
+  (`temps` 4, `hash1500` 10, `recurse` 14, `grow` 35), and within 1.6
+  times the development build; `bigint` (`t/lib.big`) is 1.2 times it.
+- The 1,500-key hash of the earlier measurement (insertion only) now
+  takes 6.1 s of wall time in a `tests/run-dos` session, against 4.2 s
+  for the development build and 55 s with 0.12; each figure includes
+  about 3 s of DOSBox-X starting.
+- What remains slower is not the heap. `arith` is twice the
+  development build's, from libkitchen16's soft-float helpers against
+  Open Watcom's (section 11.5); `read` is twice it too, not yet
+  explained (#17's stream-buffering measurement is the next step).
+- 0.14's costs, from its spec: `malloc`, `free` and `realloc` are 1,311
+  bytes of code against 621 in the compact model (far data, as here),
+  the free lists take 208 bytes of `DGROUP` against 6, and a block is
+  at least 12 bytes with far data.
+
+**Tests, 2026-11-18 (DOSBox-X 2026.01.02, emulated 8086), with libc16
+0.14.**
 - `make test`: 21 passed, `fpfmt` todo; 35 of 35 install cases.
-- `make test-rt`: 20 passed, 2 slow; 36 of 36 install cases (the 35,
-  and `EXECLTST.EXE`).
-  - The slow cases are `hashbig` and `recurse`: the heap's slowness.
-    `tests/rt-slow.txt` lets them time out, and only time out, until
-    perl16#21 pins the libc16 release that fixes libc16#30.
-  - `fpfmt` passes, but is still marked todo.
-- `make test-t-rt`: 52 of 72 `t/` scripts pass, every one the baseline
-  lists as passing except `lib.big`, which passes 246 of 246 but takes
-  about 250 s, past the 120 s limit; `tests/rt-t-slow.txt` lets it time
-  out until libc16#30 is fixed.
+- `make test-rt`: 22 of 22 passed, `hashbig` and `recurse` among them,
+  within the unchanged 60 s limit; 36 of 36 install cases (the 35, and
+  `EXECLTST.EXE`). `fpfmt` passes, but is still marked todo.
+- `make test-t-rt`: 53 of 72 `t/` scripts pass, the development
+  build's baseline exactly; `lib.big` passes within the 120 s limit.
+- With 0.12, `hashbig`, `recurse` and `lib.big` gave the right output
+  but timed out, and the runtime tests allowed exactly that until this
+  pin (`SLOW` in `tests/run-dos` and `tests/run-t`, which remains for
+  any build that needs it).
+- `make audit` compiles all 25 sources against libc16 0.14 and
+  libkitchen16 0.02. Every `__cdecl` reference resolves, and what's
+  missing is perl16's own shims (`environ`, the `exec` family,
+  `_hdopen`), which the audit doesn't link.
 - CI runs `make rt`, `make test-rt` and `make test-t-rt` in a job of
   their own.
 
@@ -965,9 +1012,11 @@ All four libc16 issues are released, and libc16 0.12 (2026-11-18) has every
 one of them. 0.12 also reserves code offset 0 in the small and compact
 models so that no function pointer is null
 ([libc16#27](https://github.com/gr-dos/libc16/issues/27)); perl16 is
-large-model and unaffected. perl16 now pins 0.12, with libkitchen16
-0.02. Section 11.6 has the audit against both; the counts in sections 4
-to 6 are against 0.07.
+large-model and unaffected. Section 11.6 has the audit against 0.12 and
+libkitchen16 0.02; the counts in sections 4 to 6 are against 0.07.
+[libc16#30](https://github.com/gr-dos/libc16/issues/30), the heap's
+quadratic time, which M3.4 found, is fixed in 0.14, which perl16 now
+pins (#21; section 11.7).
 
 ## 13. Reproducing
 
