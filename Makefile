@@ -98,11 +98,12 @@ DEV_OBJS    = $(DEV)/stk16.obj $(PERL_NAMES:%=$(DEV)/%.obj) \
 # -wx shows every warning; each module's go to its .err file beside the
 # object, and scripts/check-w131 fails the build on W131 (no prototype)
 # for a function of either library (#16). libkitchen16 comes first, in
-# the include path and the link. RT_NAMES are perl16's for libc16 alone:
-# environ and the exec family; p16init.asm puts environ's set-up in
-# libc16's init table.
+# the include path and the link. RT_NAMES are perl16's for this build
+# alone: environ and the exec family, which libc16 doesn't have, and the
+# numeric tests -fpc gets wrong (p16fp.h); p16init.asm puts environ's
+# set-up in libc16's init table.
 RT          := build/rt
-RT_NAMES    = environ exec16
+RT_NAMES    = environ exec16 p16fp
 RT_CFLAGS   = -q -zq -zl -zld -x -ml -0 -fpc -zc -bt=dos -DMSDOS \
               -DCRIPPLED_CC -DP16_RT -fi=msdos/p16rt.h -wx -I$(SRC) -Imsdos \
               -I$(LIBKITCHEN16_DIR)/include -I$(LIBC16_DIR)/include

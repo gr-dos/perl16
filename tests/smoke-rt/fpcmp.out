@@ -1,0 +1,45 @@
++0       0
+-0       -0
+1e-320   1e-320
+-1e-320  -1e-320
+2.5e-309 2.5e-309
+0.5      0.5
+-0.5     -0.5
+inf      inf
+-inf     -inf
+nan      NaN
+truth: ?: ! && || if unless while
++0       FTFFFTF
+-0       FTFFFTF
+1e-320   TFTTTFT
+-1e-320  TFTTTFT
+2.5e-309 TFTTTFT
+0.5      TFTTTFT
+-0.5     TFTTTFT
+inf      TFTTTFT
+-inf     TFTTTFT
+nan      TFTTTFT
+with 0: == != < <= > >= | 0== 0!= 0< 0<= 0> 0>= | if== if> if>= | <=> 0<=>
++0       TFFTFT TFFTFT TFT 0 0
+-0       TFFTFT TFFTFT TFT -0 0
+1e-320   FTFFTT FTTTFF FTT 1 -1
+-1e-320  FTTTFF FTFFTT FFF -1 1
+2.5e-309 FTFFTT FTTTFF FTT 1 -1
+0.5      FTFFTT FTTTFF FTT 1 -1
+-0.5     FTTTFF FTFFTT FFF -1 1
+inf      FTFFTT FTTTFF FTT 1 -1
+-inf     FTTTFF FTFFTT FFF -1 1
+nan      FTFFFF FTFFFF FFF NaN NaN
+nan with: < <= > >= == != | reversed | <=> reversed
+1        FFFFFT FFFFFT NaN NaN
+-1       FFFFFT FFFFFT NaN NaN
++0       FFFFFT FFFFFT NaN NaN
+-0       FFFFFT FFFFFT NaN NaN
+inf      FFFFFT FFFFFT NaN NaN
+nan      FFFFFT FFFFFT NaN NaN
+if nan>1 >=1 <1 ==1: FFFF
+folded: FTFFF -1 NaN
+1/-0: Illegal division by zero at (eval) line 1.
+1/1e-320: no error
+1/1e-320 folded: no error
+1/1e-320 > 1e300: T

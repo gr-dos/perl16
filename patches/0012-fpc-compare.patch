@@ -1,0 +1,184 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Graham Ollis <plicease@cpan.org>
+Date: Wed, 18 Nov 2026 14:00:00 -0700
+Subject: [PATCH] Numeric tests that wcc -fpc gets wrong
+
+The runtime build compiles floating point to libkitchen16's helpers
+(wcc -fpc). Against a literal 0.0, and in a truth test, the compiler
+calls no helper and tests only the high 16 bits, so -0.0 was true and
+non-zero and a subnormal below about 1.4e-309 false and zero; and the
+helper reports a NaN as greater than anything, so > and >= were true
+with a NaN (perl16's msdos/p16fp.h; libkitchen16's docs/spec/fpc.md).
+
+Perl's numbers met them in:
+
+- str_true() (and the str_true macro): the truth of a number;
+- <=> (eval.c and consarg.c): a difference of -0.0 gave -1, a
+  subnormal one was returned as the result, and a NaN gave 1 or -1 by
+  its sign bit instead of staying a NaN;
+- > and >= (eval.c, consarg.c, and cmd.c's test of a variable against a
+  constant);
+- division by zero (eval.c, consarg.c): 1/-0.0 was no error and
+  1/1e-320 was "Illegal division by zero";
+- rand(-0.0), and print with $# set, which compare with 0.0.
+
+These now compare with P16_ZERO, a zero the compiler can't see, and use
+p16_gt() and p16_ge(), which test for a NaN first. In the development
+build they are 0.0, > and >=, as before. tests/smoke-rt/fpcmp.pl checks
+them (#16).
+---
+ cmd.c     |  4 ++--
+ consarg.c | 10 +++++-----
+ doio.c    |  4 ++--
+ eval.c    | 12 ++++++------
+ perl.h    |  2 +-
+ str.c     |  2 +-
+ 6 files changed, 17 insertions(+), 17 deletions(-)
+
+diff --git a/cmd.c b/cmd.c
+--- a/cmd.c
++++ b/cmd.c
+@@ -511,10 +511,10 @@
+ 		match = (str_gnum(retstr) <= cmd->c_short->str_u.str_nval);
+ 		break;
+ 	    case O_GT:
+-		match = (str_gnum(retstr) >  cmd->c_short->str_u.str_nval);
++		match = p16_gt(str_gnum(retstr), cmd->c_short->str_u.str_nval);
+ 		break;
+ 	    case O_GE:
+-		match = (str_gnum(retstr) >= cmd->c_short->str_u.str_nval);
++		match = p16_ge(str_gnum(retstr), cmd->c_short->str_u.str_nval);
+ 		break;
+ 	    }
+ 	    if (match) {
+diff --git a/consarg.c b/consarg.c
+--- a/consarg.c
++++ b/consarg.c
+@@ -344,7 +344,7 @@
+ 	    break;
+ 	case O_DIVIDE:
+ 	    value = str_gnum(s2);
+-	    if (value == 0.0)
++	    if (value == P16_ZERO)
+ 		yyerror("Illegal division by constant zero");
+ 	    else
+ 		str_numset(str,str_gnum(s1) / value);
+@@ -393,7 +393,7 @@
+ 	    break;
+ 	case O_GT:
+ 	    value = str_gnum(s1);
+-	    str_numset(str,(value > str_gnum(s2)) ? 1.0 : 0.0);
++	    str_numset(str,p16_gt(value, str_gnum(s2)) ? 1.0 : 0.0);
+ 	    break;
+ 	case O_LE:
+ 	    value = str_gnum(s1);
+@@ -401,7 +401,7 @@
+ 	    break;
+ 	case O_GE:
+ 	    value = str_gnum(s1);
+-	    str_numset(str,(value >= str_gnum(s2)) ? 1.0 : 0.0);
++	    str_numset(str,p16_ge(value, str_gnum(s2)) ? 1.0 : 0.0);
+ 	    break;
+ 	case O_EQ:
+ 	    if (dowarn) {
+@@ -419,9 +419,9 @@
+ 	case O_NCMP:
+ 	    value = str_gnum(s1);
+ 	    value -= str_gnum(s2);
+-	    if (value > 0.0)
++	    if (p16_gt(value, P16_ZERO))
+ 		value = 1.0;
+-	    else if (value < 0.0)
++	    else if (value < P16_ZERO)
+ 		value = -1.0;
+ 	    str_numset(str,value);
+ 	    break;
+diff --git a/doio.c b/doio.c
+--- a/doio.c
++++ b/doio.c
+@@ -930,8 +930,8 @@
+     if (!str)
+ 	return TRUE;
+     if (ofmt &&
+-      ((str->str_nok && str->str_u.str_nval != 0.0)
+-       || (looks_like_number(str) && str_gnum(str) != 0.0) ) ) {
++      ((str->str_nok && str->str_u.str_nval != P16_ZERO)
++       || (looks_like_number(str) && str_gnum(str) != P16_ZERO) ) ) {
+ 	fprintf(fp, ofmt, str->str_u.str_nval);
+ 	return !ferror(fp);
+     }
+diff --git a/eval.c b/eval.c
+--- a/eval.c
++++ b/eval.c
+@@ -312,7 +312,7 @@
+ 	value *= str_gnum(st[2]);
+ 	goto donumset;
+     case O_DIVIDE:
+-    	if ((value = str_gnum(st[2])) == 0.0)
++    	if ((value = str_gnum(st[2])) == P16_ZERO)
+     	    fatal("Illegal division by zero");
+ 	value = str_gnum(st[1]) / value;
+ 	goto donumset;
+@@ -356,7 +356,7 @@
+ 	goto donumset;
+     case O_GT:
+ 	value = str_gnum(st[1]);
+-	value = (value > str_gnum(st[2])) ? 1.0 : 0.0;
++	value = p16_gt(value, str_gnum(st[2])) ? 1.0 : 0.0;
+ 	goto donumset;
+     case O_LE:
+ 	value = str_gnum(st[1]);
+@@ -364,7 +364,7 @@
+ 	goto donumset;
+     case O_GE:
+ 	value = str_gnum(st[1]);
+-	value = (value >= str_gnum(st[2])) ? 1.0 : 0.0;
++	value = p16_ge(value, str_gnum(st[2])) ? 1.0 : 0.0;
+ 	goto donumset;
+     case O_EQ:
+ 	if (dowarn) {
+@@ -382,9 +382,9 @@
+     case O_NCMP:
+ 	value = str_gnum(st[1]);
+ 	value -= str_gnum(st[2]);
+-	if (value > 0.0)
++	if (p16_gt(value, P16_ZERO))
+ 	    value = 1.0;
+-	else if (value < 0.0)
++	else if (value < P16_ZERO)
+ 	    value = -1.0;
+ 	goto donumset;
+     case O_BIT_AND:
+@@ -1295,7 +1295,7 @@
+ 	    value = 1.0;
+ 	else
+ 	    value = str_gnum(st[1]);
+-	if (value == 0.0)
++	if (value == P16_ZERO)
+ 	    value = 1.0;
+ #if RANDBITS == 31
+ 	value = rand() * value / 2147483648.0;
+diff --git a/perl.h b/perl.h
+--- a/perl.h
++++ b/perl.h
+@@ -441,7 +441,7 @@
+ 	      Str->str_cur > 1 || \
+ 	      (Str->str_cur && *Str->str_ptr != '0')) ? 1 : 0) \
+ 	: \
+-	    (Str->str_nok ? (Str->str_u.str_nval != 0.0) : 0 ) ))
++	    (Str->str_nok ? (Str->str_u.str_nval != P16_ZERO) : 0 ) ))
+ #endif /* CRIPPLED_CC */
+ 
+ #ifdef DEBUGGING
+diff --git a/str.c b/str.c
+--- a/str.c
++++ b/str.c
+@@ -97,7 +97,7 @@
+ 	    return 0;
+ 	}
+ 	if (Str->str_nok)
+-		return (Str->str_u.str_nval != 0.0);
++		return (Str->str_u.str_nval != P16_ZERO);
+ 	return 0;
+ }
+ #endif /* str_true */
