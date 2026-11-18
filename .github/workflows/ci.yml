@@ -12,8 +12,9 @@ jobs:
       - uses: actions/checkout@v5
 
       # make fetches tag perl-3.044 (scripts/fetch-upstream), the pinned
-      # libc16 release (scripts/fetch-libc16) and the Open Watcom snapshot
-      # it names; the snapshot is cached per pin.
+      # libc16 and libkitchen16 releases (scripts/fetch-libc16,
+      # scripts/fetch-libkitchen16) and the Open Watcom snapshot they name;
+      # the snapshot is cached per libc16 pin.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: build/tools

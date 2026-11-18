@@ -1,19 +1,19 @@
 Audit-only headers for scripts/audit-libc16 (docs/M3-RUNTIME-AUDIT.md).
 
-They stand in for headers that libc16 does not have, so that every module
-of the interpreter can be compiled against libc16's headers and the
+They stand in for what libc16's and libkitchen16's headers lack, so that
+every module of the interpreter can be compiled against them and the
 symbols it would then need can be listed. They are never used to build
 PERL.EXE, and they are not a design for the eventual headers: each one
-declares only what the Perl 3.044 sources and perl16's own files use,
-with the types ISO C (C89) or POSIX give them, in Open Watcom's default
-register convention. A symbol declared here therefore appears in the
-audit as NAME_ (not libc16's __cdecl _NAME), which is how the audit
-tells "libc16 lacks this" from "libc16 provides this".
+declares only what the Perl 3.044 sources and perl16's own files use.
 
 audit.h is force-included (wcc -fi) and supplies the few macros that
-libc16's own headers lack (errno values, stdaux/stdprn).
+libc16's headers lack (errno values, stdaux/stdprn). varargs.h stands in
+for the pre-ANSI <varargs.h> that util.c uses; M3.4 moves it to
+<stdarg.h> (#16).
 
-Sources: ISO/IEC 9899:1990 clauses 7.5, 7.6 and 7.7; POSIX.1-1990 for
-the errno names; the Microsoft C 5.1 interface for process.h's P_WAIT
-and spawn/exec names. Nothing here was taken from Open Watcom's or any
-other runtime's headers.
+setjmp.h, signal.h, process.h and math.h stood in for headers that libc16
+0.12 and libkitchen16 0.02 now provide, and were removed when perl16
+pinned those releases.
+
+Sources: ISO/IEC 9899:1990; POSIX.1-1990 for the errno names. Nothing
+here was taken from Open Watcom's or any other runtime's headers.
