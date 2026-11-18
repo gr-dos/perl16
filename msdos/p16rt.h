@@ -46,6 +46,7 @@
 #include "environ.h"		/* environ and exec, perl16's own (#17) */
 #include "p16fp.h"		/* comparisons -fpc gets wrong (#16) */
 #include "harderr.h"		/* the INT 24h handler (#17) */
+#include "ctype16.h"		/* <ctype.h> as table macros (#17) */
 
 /* $!'s text, with what a critical error recorded (harderr.c) */
 #define strerror p16_strerror
