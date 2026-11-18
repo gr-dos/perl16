@@ -17,8 +17,8 @@
 
 set -eu
 
-version=0.14
-sha256=777693e1fef3ea99845691140b9853002b9fa5701b74c2e681db7de70faeaa09
+version=0.15
+sha256=042b6d2d18c381592cc929523835a695d7b2955a606bf44df6b2a43727f0d287
 
 url=${LIBC16_URL:-https://github.com/gr-dos/libc16/releases/download/v$version/libc16-$version.zip}
 dir=${1:-build/libc16}
