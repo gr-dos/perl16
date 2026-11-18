@@ -93,6 +93,7 @@ create_new(const char *path)
     return r.x.cflag ? -(int)r.x.ax : (int)r.x.ax;
 }
 
+#if defined(__WATCOMC__) && !defined(P16_RT)
 /* Close DOS handle h without the C runtime, which doesn't know it. */
 static void
 close_handle(int h)
@@ -103,6 +104,7 @@ close_handle(int h)
     r.x.bx = h;
     intdos(&r, &r);
 }
+#endif
 
 /*
  * A stdio stream writing DOS handle h, in text mode; if there can't be
@@ -112,7 +114,7 @@ static FILE *
 stream_for(int h)
 {
     FILE *fp;
-#ifdef __WATCOMC__
+#if defined(__WATCOMC__) && !defined(P16_RT)
     int fd = _hdopen(h, O_WRONLY | O_TEXT);	/* tell the runtime about h */
 
     if (fd < 0) {
@@ -120,7 +122,7 @@ stream_for(int h)
 	return 0;
     }
 #else
-    int fd = h;
+    int fd = h;			/* libc16: a DOS handle is a descriptor, text mode */
 #endif
     if ((fp = fdopen(fd, "w")) == 0)
 	close(fd);
@@ -158,7 +160,11 @@ etemp_in(const char *dir, char **namep)
     FILE *fp;
 
     if (len + 1 + 12 + 1 > sizeof(path)) {
+#ifdef ENAMETOOLONG
 	errno = ENAMETOOLONG;
+#else
+	errno = EINVAL;		/* libc16 has no ENAMETOOLONG */
+#endif
 	return 0;
     }
     strcpy(path, dir);

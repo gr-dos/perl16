@@ -857,6 +857,79 @@ libc16's, as libkitchen16's consumers do, and links `LIBK16L.LIB` with
   missing until they compile. They are on #16's list.
 
 
+### 11.7 The runtime build (M3.4, in progress)
+
+`make rt` builds `build/rt/PERL.EXE`: the same sources compiled against
+libc16 0.12's and libkitchen16 0.02's headers and linked with their
+libraries alone (`option nodefaultlibs`), with no Open Watcom runtime.
+`make test-rt` runs the smoke and installation tests on it. The
+development build (`make`, `make test`) is unchanged and still passes.
+
+**How it compiles (#16).** `msdos/p16rt.h` is force-included in every
+module (`wcc -fi`). Under `P16_RT` it includes every libc16 and
+libkitchen16 header the interpreter needs, so each library call has its
+`__cdecl` prototype in scope before Perl's own K&R declarations, which
+agree with them. `patches/0009-p16rt.patch` does the rest:
+- `<stdarg.h>` for `deb`, `fatal`, `warn` and `mess`;
+- `P16_CB` (`__cdecl` under `P16_RT`) on the `qsort`, `signal` and
+  `atexit` callbacks;
+- no `stdaux`/`stdprn`;
+- libc16's DOS-error mapping in `ioctl`.
+
+It also fixes `setenv`'s call of `strupr`, which passed two arguments to
+a one-argument function. The link has no undefined symbol and no
+register-convention call to either library.
+
+**perl16's own shims (#17).**
+- `environ`: `msdos/environ.c`, set up from libc16's init table
+  (`msdos/p16init.asm`).
+- `exec`: `msdos/exec16.c`, which spawns with `environ` and exits with
+  the child's status.
+- Spawns: `do_aspawn` and `do_spawn` pass `environ` (`spawnvpe`,
+  `spawnve`), so children see `%ENV`.
+- Piped opens: the temporary file comes from `etemp.c`'s exclusive
+  creation instead of `tempnam`.
+- `stk16.asm` takes the stack bottom from `_end`.
+
+**Findings.**
+- **Perl's `main` overwrote DOS's memory arena.** libc16's startup calls
+  `main(argc, argv)` with `SP` at the top of the stack, which is the end
+  of the program's memory block. Perl's `main` has a third parameter,
+  `env`, which is therefore the next paragraph: the DOS memory control
+  block that follows. Patch 0004's `env = environ;` overwrote it, and the
+  program hung before any output reached its file. Under `P16_RT`, `main`
+  takes two parameters and `env` is a local. Any libc16 program whose
+  `main` writes a parameter it wasn't passed does the same. libc16 could
+  guard against it with a few bytes of slack above the stack top.
+- **The shell's command is quoted.** libc16's spawn functions quote an
+  argument containing a space, and `COMMAND.COM` doesn't undo the
+  quoting. `do_spawn` passes the command as words instead (separated by
+  single spaces). A command containing a double quote goes through
+  `system()`, which passes it as it is but with DOS's environment
+  rather than `%ENV`. A libc16 way to run `COMSPEC /C` with an
+  environment would remove both limits.
+- **libc16's heap is quadratic with many free blocks.** Measured with
+  libc16 alone, on the emulated 8086:
+  - with 2,000 free holes, 2,000 allocations that don't fit them take
+    1,123 ticks (62 s);
+  - 4,000 growing `realloc`s take 4,099 ticks (225 s);
+  - each doubling of the count multiplies the time by four.
+
+  Perl's hashes and strings produce this pattern. A 1,500-key hash takes
+  55 s to fill, against 1.3 s in the development build. `hashbig` and
+  `recurse` give the right output but take 200 s and 99 s, beyond the
+  smoke tests' 60 s limit. Arithmetic and string loops are within 1.5 s
+  of the development build.
+- **`fpfmt` passes.** libkitchen16's `printf` rounds a tie to even and
+  gets the 20th digit right, where Open Watcom's didn't (section 11.5).
+
+**Tests, 2026-11-18 (DOSBox-X 2026.01.02, emulated 8086).**
+- `make test`: 21 passed, `fpfmt` todo; 35 of 35 install cases.
+- `make test-rt`: 20 passed, 2 failed; 35 of 35 install cases.
+  - The failures are `hashbig` and `recurse`: the heap's slowness.
+  - `fpfmt` passes, but is still marked todo.
+
+
 ## 12. Issue breakdown
 
 These issues were opened from this audit. Each one's scope is the row

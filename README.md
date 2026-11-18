@@ -37,6 +37,9 @@ Perl 5.36 or later and, for the tests, `dosbox-x`.
     make test-t     # Perl 3.044's own t/ suite, against tests/t-baseline.txt
     make variants   # the M1 experimental builds, in build/var
     make measure    # the M1 stack and memory measurements
+    make rt         # build/rt/PERL.EXE: libc16 and libkitchen16 instead of
+                    # Open Watcom's runtime (M3.4, in progress)
+    make test-rt    # the smoke and installation tests of build/rt/PERL.EXE
     make audit      # what the interpreter needs from a C runtime, with
                     # Open Watcom's headers, and with libc16's and libkitchen16's
     make clean

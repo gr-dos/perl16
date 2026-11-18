@@ -48,7 +48,7 @@ struct dta {
 #define A_SYSTEM 0x04
 #define A_DIR 0x10
 
-static int
+static int P16_CB			/* called by qsort */
 cmp_names(const void *a, const void *b)
 {
     return strcmp((const char *)a, (const char *)b);

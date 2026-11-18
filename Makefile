@@ -6,6 +6,9 @@
 #                    on an emulated 8086 (tests/run-dos), and tests of
 #                    it installed on other drives and directories
 #                    (tests/run-install)
+#   make rt          build/rt/PERL.EXE, the runtime build: libc16 and
+#                    libkitchen16 instead of Open Watcom's runtime (M3.4)
+#   make test-rt     the smoke and installation tests of build/rt/PERL.EXE
 #   make test-t      Perl 3.044's own t/ suite under DOSBox-X, checked
 #                    against tests/t-baseline.txt (tests/run-t)
 #   make variants    the M1 experimental builds in build/var (below),
@@ -78,12 +81,32 @@ STACK       ?= 51k
 STK16_MARGIN ?= 2048
 DGROUP_MIN_FREE ?= 2048
 DEV_CFLAGS  = -q -zq -ml -0 -zc -bt=dos -DMSDOS -DCRIPPLED_CC -I$(SRC) \
-              -Imsdos -I$$WATCOM/h
+              -Imsdos -I$$WATCOM/h -fi=msdos/p16rt.h
 DEV_AFLAGS  = -q -ml -0 -dSTK16_MARGIN=$(STK16_MARGIN)
 DEV_LDOPTS  = disable 1027 option quiet, stack=$(STACK)
 
 DEV_OBJS    = $(DEV)/stk16.obj $(PERL_NAMES:%=$(DEV)/%.obj) \
               $(PORT_NAMES:%=$(DEV)/%.obj) $(P16_NAMES:%=$(DEV)/%.obj)
+
+# Runtime build (M3.4, #16 and #17; docs/M3-RUNTIME-AUDIT.md, section
+# 11.6): the same sources compiled as a libc16 and libkitchen16 consumer
+# is, and linked with their libraries instead of Open Watcom's runtime.
+# -zl -zld -x keep Open Watcom's headers and library records out, -fpc
+# makes floating point calls to libkitchen16's helpers, and msdos/p16rt.h,
+# force-included, puts every library prototype in scope (P16_RT).
+# libkitchen16 comes first, in the include path and the link. RT_NAMES
+# are perl16's for libc16 alone: environ and the exec family;
+# p16init.asm puts environ's set-up in libc16's init table.
+RT          := build/rt
+RT_NAMES    = environ exec16
+RT_CFLAGS   = -q -zq -zl -zld -x -ml -0 -fpc -zc -bt=dos -DMSDOS \
+              -DCRIPPLED_CC -DP16_RT -fi=msdos/p16rt.h -I$(SRC) -Imsdos \
+              -I$(LIBKITCHEN16_DIR)/include -I$(LIBC16_DIR)/include
+RT_AFLAGS   = $(DEV_AFLAGS) -dP16_RT
+RT_OBJS     = $(RT)/stk16.obj $(PERL_NAMES:%=$(RT)/%.obj) \
+              $(PORT_NAMES:%=$(RT)/%.obj) $(P16_NAMES:%=$(RT)/%.obj) \
+              $(RT_NAMES:%=$(RT)/%.obj) $(RT)/p16init.obj
+RT_LDOPTS   = option quiet, nodefaultlibs, stack=$(STACK)
 PATCHES     = $(sort $(wildcard patches/*.patch))
 
 all: $(DEV)/PERL.EXE
@@ -105,6 +128,38 @@ $(DEV)/%.obj: $(SRC)/%.c $(SRC)/.stamp $(P16_HEADERS) $(TOOLS_ENV) Makefile
 $(DEV)/%.obj: msdos/%.c $(P16_HEADERS) $(TOOLS_ENV) Makefile
 	mkdir -p $(DEV)
 	$(WATCOM_ENV) && $(CC) $(DEV_CFLAGS) -fo=$@ $<
+
+rt: $(RT)/PERL.EXE
+
+# The runtime build's tests: the same smoke and installation tests, in
+# their own work directories.
+test-rt: $(RT)/PERL.EXE $(TEST_TOOLS)
+	WORK=build/run-dos-rt perl tests/run-dos $(RT)/PERL.EXE tests/smoke
+	WORK=build/run-install-rt perl tests/run-install $(RT)/PERL.EXE \
+	  $(TEST_TOOLS)
+
+# No check-dgroup: libc16's large-model heap grows the program's memory
+# block above the stack, outside DGROUP, so DGROUP_MIN_FREE (Open
+# Watcom's near heap for children) doesn't apply. #17 sizes the stack.
+$(RT)/PERL.EXE: $(RT_OBJS) $(LIBC16L) $(LIBK16L) $(TOOLS_ENV) Makefile
+	$(WATCOM_ENV) && wlink $(RT_LDOPTS), map=$(RT)/perl.map \
+	  format dos name $@.tmp $(RT_OBJS:%=file %) \
+	  library $(LIBK16L) library $(LIBC16L)
+	mv $@.tmp $@
+
+$(RT)/%.obj: msdos/%.asm $(TOOLS_ENV) Makefile
+	mkdir -p $(RT)
+	$(WATCOM_ENV) && $(AS) $(RT_AFLAGS) -fo=$@ $<
+
+$(RT)/%.obj: $(SRC)/%.c $(SRC)/.stamp $(P16_HEADERS) $(LIBC16L) $(LIBK16L) \
+  $(TOOLS_ENV) Makefile
+	mkdir -p $(RT)
+	$(WATCOM_ENV) && $(CC) $(RT_CFLAGS) -fo=$@ $<
+
+$(RT)/%.obj: msdos/%.c $(P16_HEADERS) $(LIBC16L) $(LIBK16L) $(TOOLS_ENV) \
+  Makefile
+	mkdir -p $(RT)
+	$(WATCOM_ENV) && $(CC) $(RT_CFLAGS) -fo=$@ $<
 
 $(SRC)/%.c: $(SRC)/.stamp ;
 
@@ -217,4 +272,4 @@ clean:
 # The assembled sources are made by one rule; make must not delete them.
 .SECONDARY:
 
-.PHONY: all test test-t variants measure audit reference clean
+.PHONY: all rt test test-rt test-t variants measure audit reference clean
