@@ -133,10 +133,23 @@ rt: $(RT)/PERL.EXE
 
 # The runtime build's tests: the same smoke and installation tests, in
 # their own work directories.
-test-rt: $(RT)/PERL.EXE $(TEST_TOOLS)
+test-rt: $(RT)/PERL.EXE $(TEST_TOOLS) $(RT)/EXECLTST.EXE
 	WORK=build/run-dos-rt perl tests/run-dos $(RT)/PERL.EXE tests/smoke
 	WORK=build/run-install-rt perl tests/run-install $(RT)/PERL.EXE \
-	  $(TEST_TOOLS)
+	  $(TEST_TOOLS) $(RT)/EXECLTST.EXE
+
+# A unit test of exec16.c's execl(), which only the runtime build has,
+# linked like it. Never to be published.
+EXECLTST_OBJS = $(RT)/execltst.obj $(RT)/stk16.obj $(RT)/exec16.obj \
+  $(RT)/environ.obj $(RT)/p16init.obj
+
+$(RT)/EXECLTST.EXE: $(EXECLTST_OBJS) $(LIBC16L) $(LIBK16L) $(TOOLS_ENV)
+	$(WATCOM_ENV) && wlink $(RT_LDOPTS) format dos name $@ \
+	  $(EXECLTST_OBJS:%=file %) library $(LIBK16L) library $(LIBC16L)
+
+$(RT)/execltst.obj: tests/tools/execltst.c $(P16_HEADERS) $(LIBC16L) \
+  $(LIBK16L) $(TOOLS_ENV) Makefile
+	$(WATCOM_ENV) && $(CC) $(RT_CFLAGS) -fo=$@ $<
 
 # No check-dgroup: libc16's large-model heap grows the program's memory
 # block above the stack, outside DGROUP, so DGROUP_MIN_FREE (Open

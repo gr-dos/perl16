@@ -17,7 +17,7 @@ run-install - test an installed PERL.EXE: drives, paths, @INC, TEMP
 
 =head1 SYNOPSIS
 
-  tests/run-install PERL.EXE EXETEST.EXE ETEMPTST.EXE ERR2OUT.EXE
+  tests/run-install PERL.EXE EXETEST.EXE ETEMPTST.EXE ERR2OUT.EXE [EXECLTST.EXE]
 
 =head1 DESCRIPTION
 
@@ -37,7 +37,9 @@ output, which DOS can't do, so error messages can be checked.
 EXETEST.EXE and ETEMPTST.EXE (all three built from F<tests/tools>) unit-test
 F<msdos/exepath.c> and F<msdos/etemp.c>: environment blocks a loader
 could get wrong, and temporary file name collisions, which can't be
-arranged from a command line.
+arranged from a command line. EXECLTST.EXE, given only for the runtime
+build, unit-tests F<msdos/exec16.c>'s C<execl()>: the argument cap and
+the 126-byte command tail.
 
 Each case's standard output is compared with a pattern (a Perl regular
 expression matched against the whole output, CRLF turned into LF), and
@@ -48,8 +50,8 @@ default 300), WORK (default build/run-install), KEEP=1 to keep it.
 
 =cut
 
-my ($perl, $exetest, $etemptst, $err2out) = @ARGV;
-die "usage: $0 PERL.EXE EXETEST.EXE ETEMPTST.EXE ERR2OUT.EXE\n"
+my ($perl, $exetest, $etemptst, $err2out, $execltst) = @ARGV;
+die "usage: $0 PERL.EXE EXETEST.EXE ETEMPTST.EXE ERR2OUT.EXE [EXECLTST.EXE]\n"
     unless $err2out;
 -f $_ or die "$_ not found\n" for $perl, $exetest, $etemptst, $err2out;
 my $timeout = $ENV{DOSBOX_TIMEOUT} // 300;
@@ -71,6 +73,9 @@ copy($perl, "$work/PERL/PERL.EXE") or die "copy: $!\n";
 copy($perl, "$d/TOOLS/PERL/PERL.EXE") or die "copy: $!\n";
 copy($exetest, "$work/WORK/BIN/EXETEST.EXE") or die "copy: $!\n";
 copy($etemptst, "$work/WORK/BIN/ETEMPTST.EXE") or die "copy: $!\n";
+if ($execltst) {
+    copy($execltst, "$work/WORK/BIN/EXECLTST.EXE") or die "copy: $!\n";
+}
 copy($err2out, "$work/WORK/BIN/ERR2OUT.EXE") or die "copy: $!\n";
 put("$work/PERL/LIB/RELOC.PL", qq{sub where { "C:\\\\PERL lib"; }\n1;\n});
 put("$d/TOOLS/PERL/LIB/RELOC.PL", qq{sub where { "D:\\\\TOOLS\\\\PERL lib"; }\n1;\n});
@@ -153,6 +158,10 @@ my @cases = (
     [ 'etemptst', ['set TEMP=C:\T1'], 'C:\WORK\BIN\ETEMPTST.EXE',
       qr/names distinct: yes\nfirst in: C:\\T1\\\nlast in TEMP: C:\\T1\\\nnext in: current directory\ncontents kept: yes\n/ ],
 );
+push @cases,
+    [ 'execltst', [], 'C:\WORK\BIN\EXECLTST.EXE',
+      qr/65 arguments: E2BIG\n127-byte tail: E2BIG\n64 arguments, 126-byte tail:\nchild: 64 arguments, last z\n/ ]
+    if $execltst;
 
 # Batch labels are numbered: DOS compares only their first 8 characters.
 my @bat = ('@echo off');

@@ -884,7 +884,10 @@ register-convention call to either library.
 - `environ`: `msdos/environ.c`, set up from libc16's init table
   (`msdos/p16init.asm`).
 - `exec`: `msdos/exec16.c`, which spawns with `environ` and exits with
-  the child's status.
+  the child's status. `execl` takes at most 64 arguments, the most a
+  126-byte command tail can hold; more fail with `E2BIG` and run
+  nothing, as does a longer tail (libc16's spawn). `EXECLTST.EXE`
+  (`tests/tools/execltst.c`) tests both limits in `tests/run-install`.
 - Spawns: `do_aspawn` and `do_spawn` pass `environ` (`spawnvpe`,
   `spawnve`), so children see `%ENV`.
 - Piped opens: the temporary file comes from `etemp.c`'s exclusive

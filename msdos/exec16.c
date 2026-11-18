@@ -12,12 +12,17 @@
  * there is nothing to flush before the child runs.
  */
 
+#include <errno.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <process.h>
 #include "environ.h"
 
-/* The most arguments a 126-byte command tail can carry, and the null. */
+/* The most arguments execl() takes, arg0 included, and the null: a
+ * 126-byte command tail holds at most 63 arguments after arg0, each a
+ * space and one character. More fail with E2BIG and nothing is run;
+ * fewer can still make a tail too long, which spawnve() refuses with
+ * E2BIG. */
 #define EXEC_ARGS 65
 
 static int
@@ -51,10 +56,12 @@ execl(const char *path, const char *arg0, ...)
     argv[n++] = (char *)arg0;
     va_start(ap, arg0);
     if (arg0 != 0)
-	while (n < EXEC_ARGS && (argv[n] = va_arg(ap, char *)) != 0)
-	    n++;
+	while ((argv[n] = va_arg(ap, char *)) != 0)
+	    if (++n == EXEC_ARGS) {
+		va_end(ap);
+		errno = E2BIG;
+		return -1;
+	    }
     va_end(ap);
-    if (n == EXEC_ARGS)
-	argv[n - 1] = 0;	/* too many for DOS: spawnve says E2BIG */
     return execv(path, argv);
 }
