@@ -81,13 +81,15 @@ Also inspect `-P` preprocessing and any other use of `PRIVLIB`, so they use the 
 perl16
   |-- Perl 3.044 interpreter and DOS adaptations
   |-- libc16            (existing core runtime)
-  `-- libkitchen16      (optional, only if investigation justifies it)
+  `-- libkitchen16      (optional; created in M3.3, gr-dos/libkitchen16)
            `-- libc16
 ```
 
 **`libc16`:** Maintain a lightweight reusable runtime for smaller GR-DOS programs. Avoid making it depend on optional heavyweight components.
 
-**`libkitchen16` (provisional):** Optional library for costly or complex C facilities needed by substantial applications. `printf`/`sprintf` families, extended stdio, numeric conversions, or other features are **candidates**, not agreed implementation requirements. Keep it generic, not Perl-specific, and only create it if the audit shows a coherent reusable need.
+**`libkitchen16`:** Optional library for costly or complex C facilities needed by substantial applications. `printf`/`sprintf` families, extended stdio, numeric conversions, or other features are **candidates**, not agreed implementation requirements. Keep it generic, not Perl-specific, and only create it if the audit shows a coherent reusable need.
+
+M3.1 decided to create it (`docs/M3-RUNTIME-AUDIT.md`, section 11). It holds the `-fpc` floating-point helpers, the `printf` family, `strtod` and `<math.h>`, and depends on libc16 only for `errno` and `FILE` output. Section 11.5 of that document gives its status.
 
 **Perl-specific code:** Keep OS integration and interpreter-specific shims in `perl16`, preferentially under `msdos/`. Avoid putting Perl-specific behavior into generic libraries.
 
@@ -165,7 +167,7 @@ A release candidate must demonstrate:
 ## 10. Open investigations (not yet design decisions)
 
 - Exact Perl 3.044 external symbol/dependency inventory; amount of libc formatting Perl really uses.
-- Whether and how `libkitchen16` should exist, including its actual API and repository arrangement.
+- ~~Whether and how `libkitchen16` should exist, including its actual API and repository arrangement.~~ Resolved by M3.1: `docs/M3-RUNTIME-AUDIT.md`, section 11.
 - Whether the historical patch is needed on the official tag, and whether `GLOB.EXE` must be distributed.
 - Open Watcom code-generation helper requirements and strategy for runtime-independent startup, stack handling and software floating point.
 - Reliable executable-path API/PSP environment parsing under the target DOS variants, and behavior if that metadata is unavailable.
