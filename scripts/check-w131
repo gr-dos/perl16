@@ -1,0 +1,65 @@
+#!/usr/bin/env perl
+
+use 5.036;
+use warnings;
+
+=head1 NAME
+
+check-w131 - fail a runtime-build compile that calls a library function
+with no prototype
+
+=head1 SYNOPSIS
+
+  scripts/check-w131 LISTING... -- ERRFILE...
+
+=head1 DESCRIPTION
+
+Each LISTING is the output of C<wlib -l> for one of the runtime build's
+libraries (LIBC16L.LIB, LIBK16L.LIB). Each ERRFILE is the diagnostics
+file C<wcc -wx -fr=ERRFILE> wrote for one module.
+
+libc16's and libkitchen16's functions are C<__cdecl>. Called with no
+prototype in scope, Open Watcom uses its register convention instead,
+and the call goes wrong at run time, not at link time: the name the
+caller wants (C<strlen_>) is not the library's (C<_strlen>), and with
+C<nodefaultlibs> the link fails only if nothing else defines it. Open
+Watcom says so with warning W131, "No prototype found for function".
+msdos/p16rt.h puts every library prototype in scope (#16), so W131 for a
+library function means a module calls one that header misses.
+
+This prints every W131 whose function is a C<__cdecl> public symbol of
+one of the libraries (the name with a leading underscore) and fails if
+there is one. W131 for Perl's own functions (K&R, undeclared, the
+register convention on both sides) is expected and ignored.
+
+=cut
+
+my $sep = 0;
+my (@lists, @errs);
+for (@ARGV) {
+    if ($_ eq '--') { $sep = 1; next }
+    push @{ $sep ? \@errs : \@lists }, $_;
+}
+die "usage: check-w131 LISTING... -- ERRFILE...\n" unless @lists && $sep;
+
+my %lib;
+for my $list (@lists) {
+    open my $fh, '<', $list or die "$list: $!\n";
+    while (<$fh>) {
+        $lib{$1} = 1 if /^ {4}_(\w+)\s*$/;
+    }
+}
+die "no __cdecl symbols in @lists\n" unless %lib;
+
+my $bad = 0;
+for my $err (@errs) {
+    # wcc writes no file for a module with nothing to report
+    open my $fh, '<', $err or next;
+    while (<$fh>) {
+        next unless /W131: No prototype found for function '(\w+)'/;
+        next unless $lib{$1};
+        print STDERR "error: $1 is a library function: $_";
+        $bad++;
+    }
+}
+exit($bad ? 1 : 0);

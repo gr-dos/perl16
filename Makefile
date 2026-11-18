@@ -95,19 +95,31 @@ DEV_OBJS    = $(DEV)/stk16.obj $(PERL_NAMES:%=$(DEV)/%.obj) \
 # -zl -zld -x keep Open Watcom's headers and library records out, -fpc
 # makes floating point calls to libkitchen16's helpers, and msdos/p16rt.h,
 # force-included, puts every library prototype in scope (P16_RT).
-# libkitchen16 comes first, in the include path and the link. RT_NAMES
-# are perl16's for libc16 alone: environ and the exec family;
-# p16init.asm puts environ's set-up in libc16's init table.
+# -wx shows every warning; each module's go to its .err file beside the
+# object, and scripts/check-w131 fails the build on W131 (no prototype)
+# for a function of either library (#16). libkitchen16 comes first, in
+# the include path and the link. RT_NAMES are perl16's for libc16 alone:
+# environ and the exec family; p16init.asm puts environ's set-up in
+# libc16's init table.
 RT          := build/rt
 RT_NAMES    = environ exec16
 RT_CFLAGS   = -q -zq -zl -zld -x -ml -0 -fpc -zc -bt=dos -DMSDOS \
-              -DCRIPPLED_CC -DP16_RT -fi=msdos/p16rt.h -I$(SRC) -Imsdos \
+              -DCRIPPLED_CC -DP16_RT -fi=msdos/p16rt.h -wx -I$(SRC) -Imsdos \
               -I$(LIBKITCHEN16_DIR)/include -I$(LIBC16_DIR)/include
 RT_AFLAGS   = $(DEV_AFLAGS) -dP16_RT
 RT_OBJS     = $(RT)/stk16.obj $(PERL_NAMES:%=$(RT)/%.obj) \
               $(PORT_NAMES:%=$(RT)/%.obj) $(P16_NAMES:%=$(RT)/%.obj) \
               $(RT_NAMES:%=$(RT)/%.obj) $(RT)/p16init.obj
 RT_LDOPTS   = option quiet, nodefaultlibs, stack=$(STACK)
+RT_SYMS     = $(RT)/libc16.lst $(RT)/libk16.lst
+# Compile one module of the runtime build: wcc's output goes to the
+# module's .err file, shown only if the compile fails, and that file is
+# checked for library functions called without a prototype.
+RT_COMPILE  = rm -f $(@:.obj=.err) && $(WATCOM_ENV) && \
+              { $(CC) $(RT_CFLAGS) -fr=$(@:.obj=.err) -fo=$@ $< >/dev/null \
+                || { cat $(@:.obj=.err); exit 1; }; } && \
+              { perl scripts/check-w131 $(RT_SYMS) -- $(@:.obj=.err) \
+                || { rm -f $@; exit 1; }; }
 
 # tests/run-install's DOS tools (below)
 TEST_TOOLS  = $(DEV)/EXETEST.EXE $(DEV)/ETEMPTST.EXE $(DEV)/ERR2OUT.EXE
@@ -155,9 +167,9 @@ $(RT)/EXECLTST.EXE: $(EXECLTST_OBJS) $(LIBC16L) $(LIBK16L) $(TOOLS_ENV)
 	$(WATCOM_ENV) && wlink $(RT_LDOPTS) format dos name $@ \
 	  $(EXECLTST_OBJS:%=file %) library $(LIBK16L) library $(LIBC16L)
 
-$(RT)/execltst.obj: tests/tools/execltst.c $(P16_HEADERS) $(LIBC16L) \
-  $(LIBK16L) $(TOOLS_ENV) Makefile
-	$(WATCOM_ENV) && $(CC) $(RT_CFLAGS) -fo=$@ $<
+$(RT)/execltst.obj: tests/tools/execltst.c $(P16_HEADERS) $(RT_SYMS) \
+  $(TOOLS_ENV) scripts/check-w131 Makefile
+	$(RT_COMPILE)
 
 # No check-dgroup: libc16's large-model heap grows the program's memory
 # block above the stack, outside DGROUP, so DGROUP_MIN_FREE (Open
@@ -168,19 +180,28 @@ $(RT)/PERL.EXE: $(RT_OBJS) $(LIBC16L) $(LIBK16L) $(TOOLS_ENV) Makefile
 	  library $(LIBK16L) library $(LIBC16L)
 	mv $@.tmp $@
 
+# The libraries' symbols, for scripts/check-w131.
+$(RT)/libc16.lst: $(LIBC16L) $(TOOLS_ENV)
+	mkdir -p $(RT)
+	$(WATCOM_ENV) && wlib -q -l=$@ $(LIBC16L)
+
+$(RT)/libk16.lst: $(LIBK16L) $(TOOLS_ENV)
+	mkdir -p $(RT)
+	$(WATCOM_ENV) && wlib -q -l=$@ $(LIBK16L)
+
 $(RT)/%.obj: msdos/%.asm $(TOOLS_ENV) Makefile
 	mkdir -p $(RT)
 	$(WATCOM_ENV) && $(AS) $(RT_AFLAGS) -fo=$@ $<
 
-$(RT)/%.obj: $(SRC)/%.c $(SRC)/.stamp $(P16_HEADERS) $(LIBC16L) $(LIBK16L) \
-  $(TOOLS_ENV) Makefile
+$(RT)/%.obj: $(SRC)/%.c $(SRC)/.stamp $(P16_HEADERS) $(RT_SYMS) \
+  $(TOOLS_ENV) scripts/check-w131 Makefile
 	mkdir -p $(RT)
-	$(WATCOM_ENV) && $(CC) $(RT_CFLAGS) -fo=$@ $<
+	$(RT_COMPILE)
 
-$(RT)/%.obj: msdos/%.c $(P16_HEADERS) $(LIBC16L) $(LIBK16L) $(TOOLS_ENV) \
-  Makefile
+$(RT)/%.obj: msdos/%.c $(P16_HEADERS) $(RT_SYMS) $(TOOLS_ENV) \
+  scripts/check-w131 Makefile
 	mkdir -p $(RT)
-	$(WATCOM_ENV) && $(CC) $(RT_CFLAGS) -fo=$@ $<
+	$(RT_COMPILE)
 
 $(SRC)/%.c: $(SRC)/.stamp ;
 
