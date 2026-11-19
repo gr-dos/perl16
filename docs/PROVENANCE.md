@@ -38,6 +38,27 @@ its reasons.
 | `0011-sprintf-snprintf.patch` | perl16 | `doarg.c` | `do_sprintf()` formats each conversion with `snprintf()`, cut to 1,023 bytes, rather than overrunning `buf` (#16) |
 | `0012-fpc-compare.patch` | perl16 | `cmd.c`, `consarg.c`, `doio.c`, `eval.c`, `perl.h`, `str.c` | truth, `<=>`, `>`, `>=` and division by zero with `msdos/p16fp.h`, right under `wcc -fpc` for `-0.0`, subnormals and NaNs (#16) |
 
+## What `PERL.EXE` is linked from
+
+The runtime build (`make`, since M3) links perl16's objects, compiled
+from the upstream source with `patches/` and from `msdos/`, with two
+libraries and nothing else:
+
+| Library | License | Pinned by | Provenance |
+|---|---|---|---|
+| libc16 0.15, `LIBC16L.LIB` (large model) | MIT | `scripts/fetch-libc16`, by the release's SHA-256 | its `docs/LICENSE-PROVENANCE.md`: written clean-room from behavioural specs, with no Open Watcom runtime source read and none of its libraries disassembled, and a similarity audit against them (`docs/AUDIT.txt`) |
+| libkitchen16 0.02, `LIBK16L.LIB` (large model) | MIT | `scripts/fetch-libkitchen16`, likewise | its `docs/LICENSE-PROVENANCE.md`, on the same policy |
+
+The link checks this: `scripts/check-link` fails it if the map has a
+module or library from anything else, or an object asks for a default
+library, and `scripts/check-provenance` fails it if a library module
+linked has no entry in its library's record (docs/M3-REPORT.md,
+section 3). Open Watcom's compiler, assembler and linker are used as
+build tools only. The development build (`make dev`), the M1 variants
+and the test tools `ERR2OUT.EXE`, `TAILTST.EXE`, `FREEMEM.EXE` and
+`TICKS.EXE` are linked with Open Watcom's runtime and are never
+distributed.
+
 ## Generated files
 
 `perl.c` and `perly.h` are generated from `perl.y` by `scripts/yacc-perl`
@@ -65,6 +86,7 @@ the procedure for changing the pin.
 | `msdos/sswitch.c`, `msdos/brk16.asm` | running Perl on a stack segment of its own (SS != DS); M1 experiment, not in the default build |
 | `scripts/audit-include/*` | audit-only stand-ins for what libc16's and libkitchen16's headers lack, used by `scripts/audit-libc16` and never by the build; written from ISO C and POSIX (their `README`; docs/M3-RUNTIME-AUDIT.md, section 2) |
 | `scripts/fetch-libc16`, `scripts/fetch-libkitchen16` | copies of libc16's and libkitchen16's `consumers/` fetch scripts (MIT), set to the pinned releases: libc16 0.15 and libkitchen16 0.02, each checked by its release's SHA-256 |
+| `scripts/check-link`, `scripts/check-provenance`, `tests/link/*` | the link checks of the runtime build, DESIGN.md's release gate, and check-link's own test (M3.4, #12) |
 | `scripts/*`, `tests/*`, `Makefile` | build, audit and test tooling |
 | `upstream/*.sha256` | hashes of the upstream source, reference material and generated parser |
 
