@@ -251,13 +251,17 @@ $(RT)/execltst.obj: tests/tools/execltst.c $(P16_HEADERS) $(RT_SYMS) \
 # check-link (docs/DESIGN.md, section 8): every module in the map comes
 # from RT_OBJS or the two libraries, and no object asks for a default
 # library, so nothing of Open Watcom's runtime can be linked in.
+# check-provenance: every library module linked has an entry in its
+# library's docs/LICENSE-PROVENANCE.md, the libraries' release gate.
 $(RT)/PERL.EXE: $(RT_OBJS) $(LIBC16L) $(LIBK16L) $(TOOLS_ENV) \
-  scripts/check-dgroup scripts/check-link Makefile
+  scripts/check-dgroup scripts/check-link scripts/check-provenance \
+  Makefile
 	$(WATCOM_ENV) && wlink $(RT_LDOPTS), map=$(RT)/perl.map \
 	  format dos name $@.tmp $(RT_OBJS:%=file %) \
 	  library $(LIBK16L) library $(LIBC16L)
 	perl scripts/check-dgroup $(RT)/perl.map $(RT_DGROUP_MIN_FREE)
 	@perl scripts/check-link $(RT)/perl.map $(RT_OBJS) $(LIBK16L) $(LIBC16L)
+	perl scripts/check-provenance $(RT)/perl.map $(LIBK16L) $(LIBC16L)
 	mv $@.tmp $@
 
 # The libraries' symbols, for scripts/check-w131.

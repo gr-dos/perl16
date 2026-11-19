@@ -1,0 +1,97 @@
+#!/usr/bin/env perl
+
+use 5.036;
+use warnings;
+use File::Basename qw(basename dirname);
+
+=head1 NAME
+
+check-provenance - check that every library module linked has a provenance entry
+
+=head1 SYNOPSIS
+
+  scripts/check-provenance perl.map LIBRARY.LIB...
+
+=head1 DESCRIPTION
+
+libc16 and libkitchen16 make licensing a release gate: every module
+linked into a program needs an entry in the library's
+F<docs/LICENSE-PROVENANCE.md> before a release. For each LIBRARY.LIB
+(in a release tree, F<lib/> beside F<docs/>), this reads the modules
+the map says were linked from it and takes each one's member name (its
+source file's name without the extension, as both libraries name
+members). It fails if the file doesn't mention the member at all.
+
+A member the "Modules" table names in its first column is in the
+table. One that no row names but the file mentions elsewhere in
+backticks (a section of its own, say) is a warning, not a failure: it
+has provenance, just not a row.
+
+It prints, for each library, how many modules were linked, how many
+are in the table, and how many of those have a row whose Authors or
+Status say human review is pending.
+
+=cut
+
+my ($map, @libs) = @ARGV;
+die "usage: $0 perl.map LIBRARY.LIB...\n" unless @libs;
+
+my %linked;
+open my $fh, '<', $map or die "$map: $!\n";
+while (<$fh>) {
+    next unless /^Module:\s+(.*?)\((.*)\)\s*$/;
+    push @{$linked{$1}}, $2;
+}
+close $fh;
+
+my $fail = 0;
+for my $lib (@libs) {
+    my $prov = dirname(dirname($lib)) . '/docs/LICENSE-PROVENANCE.md';
+    open my $p, '<', $prov or die "$prov: $!\n";
+    my (%row, $in, $last);
+    my $text = '';
+    while (<$p>) {
+	$text .= $_;
+	$in = /^## Modules/ ? 1 : /^## / ? 0 : $in;
+	next unless $in && /^\|\s*`/;
+	my @cols = map { s/^\s+|\s+$//gr } split /\|/;
+	shift @cols;
+	my ($members, $authors, $status) = @cols[0, 3, 4];
+	$members =~ s/;.*//;
+	# "as above" in the Authors column repeats the row before.
+	my $pending = ($authors // '') =~ /^as above\b/i && defined $last
+	  ? $last
+	  : join(' ', $authors // '', $status // '') =~ /human review pending/i;
+	$last = $pending;
+	$row{$_} = { pending => $pending }
+	  for $members =~ /([A-Za-z_][A-Za-z0-9_.]*)/g;
+    }
+    close $p;
+    die "$prov: no Modules table\n" unless %row;
+
+    my (%seen, @prose, @missing);
+    my $pending = 0;
+    for my $src (@{$linked{$lib} // []}) {
+	my $member = basename($src) =~ s/\.[^.]*$//r;
+	next if $seen{$member}++;
+	if (my $r = $row{$member}) {
+	    $pending++ if $r->{pending};
+	} elsif ($text =~ /`[^`\n]*\b\Q$member\E\b[^`\n]*`/) {
+	    push @prose, $member;
+	} else {
+	    push @missing, "$member ($src)";
+	}
+    }
+    die "$map: nothing linked from $lib\n" unless %seen;
+    my $n = keys %seen;
+    say "check-provenance: $lib: $n modules linked, ",
+	$n - @prose - @missing, " in its Modules table ($pending with ",
+	"human review pending)";
+    say STDERR "check-provenance: warning: $lib: $_ is in $prov, ",
+	"but in no row of its Modules table" for @prose;
+    for (@missing) {
+	say STDERR "check-provenance: $lib: not in $prov: $_";
+	$fail = 1;
+    }
+}
+exit $fail;
