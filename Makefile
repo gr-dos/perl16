@@ -393,7 +393,7 @@ $(DEV)/ERR2OUT.EXE: tests/tools/err2out.c $(TOOLS_ENV)
 # with FPCTST.EXE; the INT 24h handler and the ctype table, #17, with
 # HARDTST.EXE and CTYPETST.EXE), and the installation tests, EXECLTST.EXE
 # among them.
-test: test-link $(RT)/PERL.EXE $(RT_TEST_TOOLS) $(RT)/EXECLTST.EXE \
+test: test-link test-provenance $(RT)/PERL.EXE $(RT_TEST_TOOLS) $(RT)/EXECLTST.EXE \
   $(DEV)/TAILTST.EXE $(RT)/FPCTST.EXE $(RT)/HARDTST.EXE $(RT)/CTYPETST.EXE
 	BUILD=rt perl tests/run-dos $(RT)/PERL.EXE tests/smoke
 	WORK=build/run-dos-rt BUILD=rt \
@@ -430,6 +430,23 @@ audit: $(DEV_OBJS) $(LIBC16L) $(LIBK16L) $(TOOLS_ENV) scripts/audit-libc16
 test-link:
 	sh tests/link/run
 
+# scripts/check-provenance against fixture records (tests/provenance/run).
+test-provenance:
+	sh tests/provenance/run
+
+# The release gate (docs/M4-RELEASE.md, #28): the pinned archives, the
+# link, reviewed provenance for every linked library module, and no Open
+# Watcom text in PERL.EXE. It fails until every module's review is
+# recorded; the build and the tests don't depend on it.
+release-check: $(RT)/PERL.EXE scripts/release-check
+	perl scripts/release-check $(RT)/PERL.EXE $(RT)/perl.map $(RT_OBJS)
+
+# The reviewer's worksheet: every linked library module, by provenance
+# row (docs/M4-PROVENANCE-REVIEW.md).
+provenance-worksheet: $(RT)/PERL.EXE
+	@perl scripts/check-provenance --worksheet $(RT)/perl.map \
+	  $(LIBK16L) $(LIBC16L)
+
 reference:
 	sh scripts/fetch-reference build/reference
 
@@ -440,4 +457,5 @@ clean:
 # The assembled sources are made by one rule; make must not delete them.
 .SECONDARY:
 
-.PHONY: all dev rt test test-t test-dev test-t-dev test-link variants measure audit reference clean
+.PHONY: all dev rt test test-t test-dev test-t-dev test-link test-provenance \
+  release-check provenance-worksheet variants measure audit reference clean
