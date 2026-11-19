@@ -1,0 +1,113 @@
+#!/bin/sh
+# Self-test of scripts/check-provenance with fixture provenance records
+# (prov-*.md and the tables below) and a fixture map (fix-map.txt). The
+# build's mode passes with review pending and warns on a prose-only
+# member. --release fails on each of: a prose-only member; a row with
+# review pending; a row whose Review isn't "approved by NAME, DATE"
+# ("as above", free text); a row approved while another column still
+# says review is pending; an own row approved with a "Changes to" row
+# not. A missing member fails both modes. --release passes only when
+# every row naming a linked member is approved.
+set -u
+dir=$(dirname "$0")
+tmp=${TMPDIR:-/tmp}/check-provenance.$$
+trap 'rm -rf "$tmp"' EXIT
+check=$dir/../../scripts/check-provenance
+fail=0
+
+# lib CASE PROVENANCE: a release tree $tmp/CASE with lib/X.LIB and its
+# docs/LICENSE-PROVENANCE.md from the file PROVENANCE, or from stdin if
+# it is -, and a map $tmp/CASE.map linking alpha to delta from it.
+lib() {
+    mkdir -p "$tmp/$1/lib" "$tmp/$1/docs"
+    : > "$tmp/$1/lib/X.LIB"
+    if [ "$2" = - ]; then cat; else cat "$dir/$2"; fi \
+	> "$tmp/$1/docs/LICENSE-PROVENANCE.md"
+    sed "s|LIB/lib/X.LIB|$tmp/$1/lib/X.LIB|" "$dir/fix-map.txt" > "$tmp/$1.map"
+}
+
+# expect pass|"MESSAGE" CASE [--release]: MESSAGE must be in a failure's
+# output.
+expect() {
+    want=$1 case=$2; shift 2
+    if "$check" "$@" "$tmp/$case.map" "$tmp/$case/lib/X.LIB" >"$tmp/out" 2>&1
+    then got=pass; else got=fail; fi
+    what="$case${1:+ $1}"
+    if [ "$want" = pass ] && [ "$got" = pass ]; then
+	echo "ok: pass: $what"
+    elif [ "$want" != pass ] && [ "$got" = fail ] &&
+	grep -qF -- "$want" "$tmp/out"; then
+	echo "ok: fail ($want): $what" | sed "s|$tmp/||g"
+    else
+	echo "NOT OK: wanted ${want}: $what" | sed "s|$tmp/||g"
+	sed "s|$tmp/||g; s/^/  /" "$tmp/out"
+	fail=1
+    fi
+}
+
+# warn "MESSAGE" CASE: the build's mode passes, with MESSAGE in its output.
+warn() {
+    if "$check" "$tmp/$2.map" "$tmp/$2/lib/X.LIB" >"$tmp/out" 2>&1 &&
+	grep -qF -- "$1" "$tmp/out"; then
+	echo "ok: pass, warning ($1): $2"
+    else
+	echo "NOT OK: wanted a pass with warning $1: $2"
+	sed "s|$tmp/||g; s/^/  /" "$tmp/out"
+	fail=1
+    fi
+}
+
+lib pending prov-pending.md
+warn "delta is in" pending
+expect "release: $tmp/pending/lib/X.LIB: delta is in" pending --release
+expect "no recorded human review" pending --release
+expect "for: alpha beta gamma" pending --release
+
+lib approved prov-approved.md
+expect pass approved
+expect pass approved --release
+
+lib missing - <<'TABLE'
+## Modules
+
+| Member | Source | Spec | Authors | Status | Review |
+|---|---|---|---|---|---|
+| `alpha`, `beta`, `gamma` | `crt/*.c` | | A session | Written | approved by A. Reviewer, 2026-11-20 |
+TABLE
+expect "not in $tmp/missing/docs/LICENSE-PROVENANCE.md: delta" missing
+expect "not in $tmp/missing/docs/LICENSE-PROVENANCE.md: delta" missing --release
+
+lib notapproved - <<'TABLE'
+## Modules
+
+| Member | Source | Spec | Authors | Status | Review |
+|---|---|---|---|---|---|
+| `alpha`, `beta` | `crt/*.c` | | A session | Written | approved by A. Reviewer, 2026-11-20 |
+| `gamma` | `crt/gamma.c` | | A session | Written | as above |
+| `delta` | `crt/delta.c` | | A session | Written | reviewed, looks fine |
+TABLE
+expect "for: gamma delta" notapproved --release
+
+lib stillpending - <<'TABLE'
+## Modules
+
+| Member | Source | Spec | Authors | Status | Review |
+|---|---|---|---|---|---|
+| `alpha`, `beta`, `gamma` | `crt/*.c` | | A session; human review pending | Written | approved by A. Reviewer, 2026-11-20 |
+| `delta` | `crt/delta.c` | | A session | Written | approved by A. Reviewer, 2026-11-20 |
+TABLE
+expect "for: alpha beta gamma" stillpending --release
+
+lib changes - <<'TABLE'
+## Modules
+
+| Member | Source | Spec | Authors | Status | Review |
+|---|---|---|---|---|---|
+| `alpha` | `crt/alpha.c` | | A session | Written | approved by A. Reviewer, 2026-11-20 |
+| `beta`, `gamma`, `delta` | `crt/*.c` | | A session | Written | approved by A. Reviewer, 2026-11-20 |
+| Changes to `alpha` | `crt/alpha.c` | | A session | Written | |
+TABLE
+expect "for: alpha" changes --release
+expect pass changes
+
+exit $fail

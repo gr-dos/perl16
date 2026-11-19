@@ -16,6 +16,11 @@ DOS extender), built with Open Watcom on Linux. The plan is in
 - [`docs/M3-REPORT.md`](docs/M3-REPORT.md): the runtime migration's
   result; size, memory, speed, the link checks, and what is left for
   M4.
+- [`docs/M4-RELEASE.md`](docs/M4-RELEASE.md): the release gate
+  (`make release-check`), the license and notice analysis, and what
+  must be done before a release;
+  [`docs/M4-PROVENANCE-REVIEW.md`](docs/M4-PROVENANCE-REVIEW.md), the
+  human review of the libraries' provenance that it waits for.
 
 [`docs/DOS.md`](docs/DOS.md) describes how `PERL.EXE` behaves on DOS:
 installing it, `@INC`, `-e`, limits, and what DOS can't do.
@@ -48,6 +53,8 @@ Perl 5.36 or later and, for the tests, `dosbox-x`.
                     # Open Watcom's runtime (never to be published)
     make test-dev   # its smoke and installation tests
     make test-t-dev # the t/ suite under it
+    make release-check  # the release gate (fails until the provenance
+                        # review is recorded; docs/M4-RELEASE.md)
     make variants   # the M1 experimental builds, in build/var
     make measure    # the M1 stack and memory measurements
     make audit      # what the interpreter needs from a C runtime, with

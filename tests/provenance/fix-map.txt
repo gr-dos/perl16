@@ -1,0 +1,7 @@
+Open Watcom Linker (fixture for tests/provenance/run)
+
+Module: t.obj(t.c)
+Module: LIB/lib/X.LIB(/work/lib/crt/alpha.c)
+Module: LIB/lib/X.LIB(/work/lib/crt/beta.c)
+Module: LIB/lib/X.LIB(/work/lib/crt/gamma.c)
+Module: LIB/lib/X.LIB(/work/lib/crt/delta.c)

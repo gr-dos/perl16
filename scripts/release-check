@@ -1,0 +1,136 @@
+#!/usr/bin/env perl
+
+use 5.036;
+use warnings;
+use Digest::SHA;
+use FindBin;
+
+=head1 NAME
+
+release-check - the release gate for a PERL.EXE (M4, #28)
+
+=head1 SYNOPSIS
+
+  scripts/release-check PERL.EXE perl.map OBJECT...
+
+=head1 DESCRIPTION
+
+Checks that the runtime build's PERL.EXE may be published
+(docs/M4-RELEASE.md). Every check runs, and it fails if any fails:
+
+=over
+
+=item 1.
+
+B<The pinned archives.> For libc16 and libkitchen16, the version and
+SHA-256 pinned in F<scripts/fetch-libc16> and
+F<scripts/fetch-libkitchen16>; the archive they fetched
+(F<build/libc16.zip>, F<build/libkitchen16.zip>) must have that SHA-256,
+and the files of the unpacked tree the build used (F<build/libc16>,
+F<build/libkitchen16>) that the link and the checks read must be
+byte for byte the archive's: the large-model library, F<VERSION>,
+F<LICENSE>, F<docs/LICENSE-PROVENANCE.md> and F<docs/AUDIT.txt>.
+
+=item 2.
+
+B<check-link> on the map, with OBJECT... and the two libraries.
+
+=item 3.
+
+B<check-provenance --release>: every linked library module in its
+library's Modules table, with a recorded, approved human review.
+
+=item 4.
+
+B<No Open Watcom runtime text> in PERL.EXE: no "Open Watcom", "Watcom"
+or "Sybase" string (the development build carries Open Watcom's
+copyright notice).
+
+=item 5.
+
+B<The map is PERL.EXE's>: its "Executable Image" is PERL.EXE (or
+PERL.EXE.tmp, as the Makefile links).
+
+=back
+
+=cut
+
+my ($exe, $map, @objs) = @ARGV;
+die "usage: $0 PERL.EXE perl.map OBJECT...\n" unless @objs;
+my $scripts = $FindBin::Bin;
+my @fail;
+my @libs;
+
+sub pin ($script) {
+    open my $fh, '<', $script or die "$script: $!\n";
+    my %v;
+    while (<$fh>) {
+	$v{$1} = $2 if /^(version|sha256)=(\S+)\s*$/;
+    }
+    close $fh;
+    die "$script: no version or sha256\n" unless $v{version} && $v{sha256};
+    return @v{qw(version sha256)};
+}
+
+sub slurp ($file) {
+    open my $fh, '<:raw', $file or return undef;
+    local $/;
+    my $data = <$fh>;
+    close $fh;
+    return $data;
+}
+
+for my $l (['libc16', 'LIBC16L.LIB'], ['libkitchen16', 'LIBK16L.LIB']) {
+    my ($name, $libfile) = @$l;
+    my ($version, $sha256) = pin("$scripts/fetch-$name");
+    my $tree = "build/$name";
+    my $zip = "$tree.zip";
+    push @libs, "$tree/lib/$libfile";
+    my $got = -f $zip ? Digest::SHA->new(256)->addfile($zip, 'b')->hexdigest : 'none';
+    if ($got ne $sha256) {
+	push @fail, "$zip: sha256 $got, but scripts/fetch-$name pins $name $version as $sha256";
+	next;
+    }
+    say "release-check: $zip: $name $version, sha256 $sha256 as pinned";
+    for my $f ("lib/$libfile", 'VERSION', 'LICENSE', 'docs/LICENSE-PROVENANCE.md',
+	       'docs/AUDIT.txt') {
+	open my $u, '-|:raw', 'unzip', '-p', $zip, "$name-$version/$f"
+	    or die "unzip: $!\n";
+	local $/;
+	my $want = <$u> // '';
+	close $u;
+	my $have = slurp("$tree/$f");
+	if ($want eq '') {
+	    push @fail, "$zip: no $name-$version/$f";
+	} elsif (!defined $have || $have ne $want) {
+	    push @fail, "$tree/$f is not the pinned archive's $name-$version/$f";
+	}
+    }
+}
+
+for my $cmd (["$scripts/check-link", $map, @objs, @libs],
+	     ["$scripts/check-provenance", '--release', $map, @libs]) {
+    my $name = $cmd->[0] =~ s{.*/}{}r;
+    push @fail, "$name failed (above)" if system($^X, @$cmd) != 0;
+}
+
+my $image = slurp($exe) // die "$exe: $!\n";
+for my $s ('Open Watcom', 'Watcom', 'WATCOM', 'Sybase') {
+    push @fail, "$exe contains \"$s\"" if index($image, $s) >= 0;
+}
+
+my $mapped;
+open my $m, '<', $map or die "$map: $!\n";
+while (<$m>) {
+    $mapped = $1, last if /^Executable Image:\s+(\S+)/;
+}
+close $m;
+push @fail, "$map is the map of " . ($mapped // 'nothing') . ", not $exe"
+    unless defined $mapped && ($mapped eq $exe || $mapped eq "$exe.tmp");
+
+if (@fail) {
+    say STDERR "release-check: FAIL: $_" for @fail;
+    say STDERR "release-check: $exe may not be published (docs/M4-RELEASE.md)";
+    exit 1;
+}
+say "release-check: $exe passes the release gate";
