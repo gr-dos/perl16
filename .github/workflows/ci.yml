@@ -47,6 +47,14 @@ jobs:
       - name: Test (t/ suite)
         run: make test-t
 
+      # The release gate (docs/M4-RELEASE.md): it fails until every
+      # linked library module's provenance review is recorded, so it
+      # reports here without failing the job. A release workflow must not
+      # allow it to fail.
+      - name: Release gate (report only)
+        continue-on-error: true
+        run: make release-check
+
   # The development build (M2): Open Watcom's runtime, the reference the
   # runtime build is compared with. Never published (docs/DESIGN.md,
   # section 8).

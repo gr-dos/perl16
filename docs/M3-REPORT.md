@@ -262,9 +262,12 @@ tools, which DESIGN.md, section 8 allows.
   - exit statuses through `COMMAND.COM`. DOSBox-X's returns its own
     status, so backticks and piped opens fail under it in both builds,
     and the tests use `system` with redirection instead.
-- **Provenance review.** Both libraries' records say human review is
-  pending for every module perl16 links (section 3), and libc16's
-  `systeme` and `envblock` need rows in its Modules table.
+- **Provenance review** (#28). Both libraries' records say human
+  review is pending for every module perl16 links (section 3), and
+  libc16's `systeme` and `envblock` need rows in its Modules table.
+  `make release-check` enforces both; [M4-RELEASE.md](M4-RELEASE.md)
+  has the gate and the license analysis, and
+  [M4-PROVENANCE-REVIEW.md](M4-PROVENANCE-REVIEW.md) the worksheet.
 - **perl16's own license** is still to be chosen (README.md;
   M0-AUDIT.md, section 3).
 - **The package.** The layout (`PERL.EXE` and which of Perl 3's `lib`
