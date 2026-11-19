@@ -1,24 +1,27 @@
 # perl16: Perl 3.044 for 16-bit MS-DOS, built with Open Watcom
 # (docs/DESIGN.md).
 #
-#   make             build/dev/PERL.EXE, the development build (below)
-#   make test        smoke tests of build/dev/PERL.EXE under DOSBox-X,
-#                    on an emulated 8086 (tests/run-dos), and tests of
-#                    it installed on other drives and directories
-#                    (tests/run-install)
-#   make rt          build/rt/PERL.EXE, the runtime build: libc16 and
-#                    libkitchen16 instead of Open Watcom's runtime (M3.4)
-#   make test-rt     the smoke and installation tests of build/rt/PERL.EXE
+#   make             build/rt/PERL.EXE, linked with libc16 and libkitchen16
+#                    alone (the runtime build, M3.4; below); check-link
+#                    refuses any other runtime
+#   make test        tests of build/rt/PERL.EXE under DOSBox-X, on an
+#                    emulated 8086: check-link's own (tests/link), the
+#                    smoke tests and the runtime build's own
+#                    (tests/run-dos), and tests of it installed on other
+#                    drives and directories (tests/run-install)
 #   make test-t      Perl 3.044's own t/ suite under DOSBox-X, checked
 #                    against tests/t-baseline.txt (tests/run-t)
-#   make test-t-rt   the same, under build/rt/PERL.EXE
+#   make dev         build/dev/PERL.EXE, the development build with Open
+#                    Watcom's runtime (M1 and M2; below)
+#   make test-dev    the smoke and installation tests of build/dev/PERL.EXE
+#   make test-t-dev  the t/ suite under build/dev/PERL.EXE
 #   make variants    the M1 experimental builds in build/var (below),
 #                    and FREEMEM.EXE and TICKS.EXE for the probes
 #                    (scripts/build-variant, tests/tools)
 #   make measure     the M1 stack and memory measurements of the variants
 #                    (scripts/stack-probe, scripts/mem-probe;
 #                    docs/M1-REPORT.md)
-#   make audit       runtime inventory of the interpreter's objects:
+#   make audit       runtime inventory of the development build's objects:
 #                    build/audit/report.txt (scripts/audit-externals),
 #                    and of its sources recompiled against libc16's and
 #                    libkitchen16's headers and linked with both
@@ -28,9 +31,10 @@
 #                    build/reference (not needed to build)
 #   make clean       remove build products; keep downloads and tools
 #
-# build/dev/PERL.EXE and the build/var variants are linked with Open
-# Watcom's C runtime. They are development and test binaries only and
-# must never be published (docs/DESIGN.md, section 8).
+# build/dev/PERL.EXE, the build/var variants and the test tools linked
+# with Open Watcom's C runtime (ERR2OUT.EXE, TAILTST.EXE) are development
+# and test binaries only and must never be published (docs/DESIGN.md,
+# section 8). No binary is published before M4's release candidate.
 #
 # The source is tag perl-3.044 (scripts/fetch-upstream) with patches/*
 # applied in order, msdos/ flattened into the top directory as the
@@ -64,9 +68,10 @@ PORT_NAMES  = msdos popen directory
 P16_NAMES   = exepath etemp dosglob
 P16_HEADERS = $(wildcard msdos/*.h)
 
-# Development build: large model, 8086 instructions, Open Watcom's headers
-# and runtime. -zc puts string literals in the code segment; without it
-# DGROUP overflows (docs/M0-AUDIT.md, section 6).
+# Development build (make dev; M1 and M2, kept as the reference the
+# runtime build is compared with): large model, 8086 instructions, Open
+# Watcom's headers and runtime. -zc puts string literals in the code
+# segment; without it DGROUP overflows (docs/M0-AUDIT.md, section 6).
 #
 # The stack (docs/M2-REPORT.md, section 4): -DCRIPPLED_CC, as the
 # historical port was built, makes str_get, str_gnum and str_true
@@ -89,9 +94,10 @@ DEV_LDOPTS  = disable 1027 option quiet, stack=$(STACK)
 DEV_OBJS    = $(DEV)/stk16.obj $(PERL_NAMES:%=$(DEV)/%.obj) \
               $(PORT_NAMES:%=$(DEV)/%.obj) $(P16_NAMES:%=$(DEV)/%.obj)
 
-# Runtime build (M3.4, #16 and #17; docs/M3-RUNTIME-AUDIT.md, section
-# 11.6): the same sources compiled as a libc16 and libkitchen16 consumer
-# is, and linked with their libraries instead of Open Watcom's runtime.
+# Runtime build (the default; M3.4, #16 and #17; docs/M3-REPORT.md and
+# docs/M3-RUNTIME-AUDIT.md, section 11.7): the same sources compiled as
+# a libc16 and libkitchen16 consumer is, and linked with their libraries
+# instead of Open Watcom's runtime.
 # -zl -zld -x keep Open Watcom's headers and library records out, -fpc
 # makes floating point calls to libkitchen16's helpers, and msdos/p16rt.h,
 # force-included, puts every library prototype in scope (P16_RT).
@@ -131,12 +137,15 @@ RT_COMPILE  = rm -f $(@:.obj=.err) && $(WATCOM_ENV) && \
               { perl scripts/check-w131 $(RT_SYMS) -- $(@:.obj=.err) \
                 || { rm -f $@; exit 1; }; }
 
-# tests/run-install's DOS tools (below)
-TEST_TOOLS  = $(DEV)/EXETEST.EXE $(DEV)/ETEMPTST.EXE $(DEV)/ERR2OUT.EXE
+# tests/run-install's DOS tools (below), for each build
+RT_TEST_TOOLS  = $(RT)/EXETEST.EXE $(RT)/ETEMPTST.EXE $(DEV)/ERR2OUT.EXE
+DEV_TEST_TOOLS = $(DEV)/EXETEST.EXE $(DEV)/ETEMPTST.EXE $(DEV)/ERR2OUT.EXE
 
 PATCHES     = $(sort $(wildcard patches/*.patch))
 
-all: $(DEV)/PERL.EXE
+all: $(RT)/PERL.EXE
+
+dev: $(DEV)/PERL.EXE
 
 $(DEV)/PERL.EXE: $(DEV_OBJS) $(TOOLS_ENV) scripts/check-dgroup Makefile
 	$(WATCOM_ENV) && wlink $(DEV_LDOPTS), map=$(DEV)/perl.map \
@@ -157,21 +166,6 @@ $(DEV)/%.obj: msdos/%.c $(P16_HEADERS) $(TOOLS_ENV) Makefile
 	$(WATCOM_ENV) && $(CC) $(DEV_CFLAGS) -fo=$@ $<
 
 rt: $(RT)/PERL.EXE
-
-# The runtime build's tests: the same smoke and installation tests, in
-# their own work directories, and EXECLTST.EXE; then tests/smoke-rt,
-# its own cases (system() with %ENV, #22, with TAILTST.EXE; numeric
-# comparisons, #16, with FPCTST.EXE; the INT 24h handler and the ctype
-# table, #17, with HARDTST.EXE and CTYPETST.EXE).
-test-rt: $(RT)/PERL.EXE $(TEST_TOOLS) $(RT)/EXECLTST.EXE $(DEV)/TAILTST.EXE \
-  $(RT)/FPCTST.EXE $(RT)/HARDTST.EXE $(RT)/CTYPETST.EXE
-	WORK=build/run-dos-rt BUILD=rt perl tests/run-dos $(RT)/PERL.EXE tests/smoke
-	WORK=build/run-dos-rt2 BUILD=rt \
-	  FILES="$(DEV)/TAILTST.EXE $(RT)/FPCTST.EXE $(RT)/HARDTST.EXE \
-	  $(RT)/CTYPETST.EXE" \
-	  perl tests/run-dos $(RT)/PERL.EXE tests/smoke-rt
-	WORK=build/run-install-rt perl tests/run-install $(RT)/PERL.EXE \
-	  $(TEST_TOOLS) $(RT)/EXECLTST.EXE
 
 # A unit test of exec16.c's execl(), which only the runtime build has,
 # linked like it. Never to be published.
@@ -218,6 +212,30 @@ $(RT)/FPCTST.EXE: $(FPCTST_OBJS) $(LIBC16L) $(LIBK16L) $(TOOLS_ENV)
 
 $(RT)/fpctst.obj: tests/tools/fpctst.c $(P16_HEADERS) $(RT_SYMS) \
   $(TOOLS_ENV) scripts/check-w131 Makefile
+	@echo "$(CC) $(RT_CFLAGS) -fo=$@ $<"
+	@$(RT_COMPILE)
+
+# EXETEST.EXE and ETEMPTST.EXE, tests/run-install's unit tests of
+# exepath.c and etemp.c, compiled and linked like the runtime build.
+EXETEST_OBJS = $(RT)/exetest.obj $(RT)/stk16.obj $(RT)/exepath.obj \
+  $(RT)/ctype16.obj
+ETEMPTST_OBJS = $(RT)/etemptst.obj $(RT)/stk16.obj $(RT)/ctype16.obj
+
+$(RT)/EXETEST.EXE: $(EXETEST_OBJS) $(LIBC16L) $(LIBK16L) $(TOOLS_ENV)
+	$(WATCOM_ENV) && wlink $(RT_LDOPTS) format dos name $@ \
+	  $(EXETEST_OBJS:%=file %) library $(LIBK16L) library $(LIBC16L)
+
+$(RT)/ETEMPTST.EXE: $(ETEMPTST_OBJS) $(LIBC16L) $(LIBK16L) $(TOOLS_ENV)
+	$(WATCOM_ENV) && wlink $(RT_LDOPTS) format dos name $@ \
+	  $(ETEMPTST_OBJS:%=file %) library $(LIBK16L) library $(LIBC16L)
+
+$(RT)/exetest.obj: tests/tools/exetest.c $(P16_HEADERS) $(RT_SYMS) \
+  $(TOOLS_ENV) scripts/check-w131 Makefile
+	@echo "$(CC) $(RT_CFLAGS) -fo=$@ $<"
+	@$(RT_COMPILE)
+
+$(RT)/etemptst.obj: tests/tools/etemptst.c msdos/etemp.c $(P16_HEADERS) \
+  $(RT_SYMS) $(TOOLS_ENV) scripts/check-w131 Makefile
 	@echo "$(CC) $(RT_CFLAGS) -fo=$@ $<"
 	@$(RT_COMPILE)
 
@@ -331,9 +349,10 @@ measure: variants $(UPSTREAM)/.git-tree
 	  build/var/dev/PERL.EXE build/var/ss64/PERL.EXE
 
 # DOS tools for tests/run-install: unit tests of perl16's own code, built
-# like PERL.EXE, and ERR2OUT.EXE, which lets a test see standard error.
-# Like PERL.EXE, never to be published. (TEST_TOOLS is set with the
-# other variables, above: test-rt names it as a prerequisite first.)
+# like PERL.EXE (the runtime build's are above, with the other test
+# tools), and ERR2OUT.EXE, which lets a test see standard error. Like
+# PERL.EXE, never to be published. (DEV_TEST_TOOLS and RT_TEST_TOOLS are
+# set with the other variables, above.)
 
 $(DEV)/EXETEST.EXE: tests/tools/exetest.c $(DEV)/exepath.obj $(P16_HEADERS) \
   $(TOOLS_ENV)
@@ -343,31 +362,54 @@ $(DEV)/EXETEST.EXE: tests/tools/exetest.c $(DEV)/exepath.obj $(P16_HEADERS) \
 
 $(DEV)/ETEMPTST.EXE: tests/tools/etemptst.c msdos/etemp.c $(P16_HEADERS) \
   $(TOOLS_ENV)
+	mkdir -p $(DEV)
 	$(WATCOM_ENV) && $(CC) $(DEV_CFLAGS) -fo=$(DEV)/etemptst.obj $< && \
 	  wlink option quiet system dos name $@ file $(DEV)/etemptst.obj
 
 # TAILTST.EXE prints its command tail and environment, for
-# tests/smoke-rt; built like ERR2OUT.EXE.
+# tests/smoke-rt, and ERR2OUT.EXE runs a command with standard error on
+# standard output. Both are small-model test tools with Open Watcom's
+# runtime, which both builds' tests use; they are never distributed
+# (docs/M3-REPORT.md, section 6).
 $(DEV)/TAILTST.EXE: tests/tools/tailtst.c $(TOOLS_ENV)
+	mkdir -p $(DEV)
 	$(WATCOM_ENV) && $(CC) -q -zq -ms -0 -bt=dos -I$$WATCOM/h \
 	  -fo=$(DEV)/tailtst.obj $< && \
 	  wlink option quiet system dos name $@ file $(DEV)/tailtst.obj
 
 $(DEV)/ERR2OUT.EXE: tests/tools/err2out.c $(TOOLS_ENV)
+	mkdir -p $(DEV)
 	$(WATCOM_ENV) && $(CC) -q -zq -ms -0 -bt=dos -I$$WATCOM/h \
 	  -fo=$(DEV)/err2out.obj $< && \
 	  wlink option quiet system dos name $@ file $(DEV)/err2out.obj
 
-test: $(DEV)/PERL.EXE $(TEST_TOOLS)
-	BUILD=dev perl tests/run-dos $(DEV)/PERL.EXE tests/smoke
-	perl tests/run-install $(DEV)/PERL.EXE $(TEST_TOOLS)
+# The tests (the runtime build's PERL.EXE, M3.4): check-link's own test,
+# the smoke tests, tests/smoke-rt, the cases only the runtime build has
+# (system() with %ENV, #22, with TAILTST.EXE; numeric comparisons, #16,
+# with FPCTST.EXE; the INT 24h handler and the ctype table, #17, with
+# HARDTST.EXE and CTYPETST.EXE), and the installation tests, EXECLTST.EXE
+# among them.
+test: test-link $(RT)/PERL.EXE $(RT_TEST_TOOLS) $(RT)/EXECLTST.EXE \
+  $(DEV)/TAILTST.EXE $(RT)/FPCTST.EXE $(RT)/HARDTST.EXE $(RT)/CTYPETST.EXE
+	BUILD=rt perl tests/run-dos $(RT)/PERL.EXE tests/smoke
+	WORK=build/run-dos-rt BUILD=rt \
+	  FILES="$(DEV)/TAILTST.EXE $(RT)/FPCTST.EXE $(RT)/HARDTST.EXE \
+	  $(RT)/CTYPETST.EXE" \
+	  perl tests/run-dos $(RT)/PERL.EXE tests/smoke-rt
+	perl tests/run-install $(RT)/PERL.EXE $(RT_TEST_TOOLS) $(RT)/EXECLTST.EXE
 
-test-t: $(DEV)/PERL.EXE $(UPSTREAM)/.git-tree
-	perl tests/run-t $(DEV)/PERL.EXE $(UPSTREAM) tests/t-baseline.txt
+test-t: $(RT)/PERL.EXE $(UPSTREAM)/.git-tree
+	perl tests/run-t $(RT)/PERL.EXE $(UPSTREAM) tests/t-baseline.txt
 
-# The t/ suite under the runtime build, against the same baseline.
-test-t-rt: $(RT)/PERL.EXE $(UPSTREAM)/.git-tree
-	WORK=build/run-t-rt perl tests/run-t $(RT)/PERL.EXE $(UPSTREAM) \
+# The development build's tests, as in M2, in their own work directories.
+test-dev: $(DEV)/PERL.EXE $(DEV_TEST_TOOLS)
+	WORK=build/run-dos-dev BUILD=dev perl tests/run-dos $(DEV)/PERL.EXE \
+	  tests/smoke
+	WORK=build/run-install-dev perl tests/run-install $(DEV)/PERL.EXE \
+	  $(DEV_TEST_TOOLS)
+
+test-t-dev: $(DEV)/PERL.EXE $(UPSTREAM)/.git-tree
+	WORK=build/run-t-dev perl tests/run-t $(DEV)/PERL.EXE $(UPSTREAM) \
 	  tests/t-baseline.txt
 
 audit: $(DEV_OBJS) $(LIBC16L) $(LIBK16L) $(TOOLS_ENV) scripts/audit-libc16
@@ -394,4 +436,4 @@ clean:
 # The assembled sources are made by one rule; make must not delete them.
 .SECONDARY:
 
-.PHONY: all rt test test-rt test-t test-t-rt test-link variants measure audit reference clean
+.PHONY: all dev rt test test-t test-dev test-t-dev test-link variants measure audit reference clean
