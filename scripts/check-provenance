@@ -3,14 +3,16 @@
 use 5.036;
 use warnings;
 use File::Basename qw(basename dirname);
+use Getopt::Long qw(GetOptions);
 
 =head1 NAME
 
-check-provenance - check that every library module linked has a provenance entry
+check-provenance - check that every library module linked has a reviewed provenance entry
 
 =head1 SYNOPSIS
 
-  scripts/check-provenance perl.map LIBRARY.LIB...
+  scripts/check-provenance [--release] perl.map LIBRARY.LIB...
+  scripts/check-provenance --worksheet perl.map LIBRARY.LIB...
 
 =head1 DESCRIPTION
 
@@ -20,21 +22,69 @@ F<docs/LICENSE-PROVENANCE.md> before a release. For each LIBRARY.LIB
 (in a release tree, F<lib/> beside F<docs/>), this reads the modules
 the map says were linked from it and takes each one's member name (its
 source file's name without the extension, as both libraries name
-members). It fails if the file doesn't mention the member at all.
+members). A member is
 
-A member the "Modules" table names in its first column is in the
-table. One that no row names but the file mentions elsewhere in
-backticks (a section of its own, say) is a warning, not a failure: it
-has provenance, just not a row.
+=over
 
-It prints, for each library, how many modules were linked, how many
-are in the table, and how many of those have a row whose Authors or
-Status say human review is pending.
+=item in the table
+
+if the first column of a row of the file's "Modules" table names it;
+
+=item prose-only
+
+if no row names it but the file mentions it elsewhere in backticks (a
+section of its own, say);
+
+=item missing
+
+otherwise.
+
+=back
+
+A row is B<reviewed> if the table has a column headed "Review" (or
+"Human review") and the row's cell in it reads
+
+  approved by NAME, YYYY-MM-DD
+
+followed by anything (a note, a commit). Nothing else counts: a row
+that says "human review pending" in any column, or "as above", or has
+no Review cell, is not reviewed. (docs/M4-RELEASE.md, section 3, gives
+the convention.)
+
+=head2 Modes
+
+=over
+
+=item default (the build)
+
+Fails only on a missing member; a prose-only member is a warning, and
+unreviewed rows are counted. Development and test builds use this, so
+they stay usable while reviews are outstanding.
+
+=item --release
+
+The release gate (make release-check): fails on a missing member, a
+prose-only member, and any member whose row isn't reviewed.
+
+=item --worksheet
+
+Prints the review worksheet as Markdown, one section per library, one
+entry per table row that covers a linked member: the linked members,
+sources, spec, authors, status, the file's section on them, each
+member's similarity score from the library's F<docs/AUDIT.txt> (the
+large-model library's section), and the review state. Prose-only and
+missing members are listed after the rows.
+
+=back
 
 =cut
 
+my ($release, $worksheet);
+GetOptions('release' => \$release, 'worksheet' => \$worksheet)
+  or die "usage: $0 [--release|--worksheet] perl.map LIBRARY.LIB...\n";
 my ($map, @libs) = @ARGV;
-die "usage: $0 perl.map LIBRARY.LIB...\n" unless @libs;
+die "usage: $0 [--release|--worksheet] perl.map LIBRARY.LIB...\n"
+  unless @libs;
 
 my %linked;
 open my $fh, '<', $map or die "$map: $!\n";
@@ -44,53 +94,170 @@ while (<$fh>) {
 }
 close $fh;
 
-my $fail = 0;
-for my $lib (@libs) {
-    my $prov = dirname(dirname($lib)) . '/docs/LICENSE-PROVENANCE.md';
+# The Modules table: its rows, with each member they name.
+sub read_provenance ($prov) {
     open my $p, '<', $prov or die "$prov: $!\n";
-    my (%row, $in, $last);
+    my ($in, @head, @rows, %row_of, $section);
     my $text = '';
     while (<$p>) {
 	$text .= $_;
-	$in = /^## Modules/ ? 1 : /^## / ? 0 : $in;
-	next unless $in && /^\|\s*`/;
+	if (/^## /) {
+	    $in = /^## Modules/;
+	    @head = ();
+	    next;
+	}
+	next unless $in && /^\|/;
 	my @cols = map { s/^\s+|\s+$//gr } split /\|/;
 	shift @cols;
-	my ($members, $authors, $status) = @cols[0, 3, 4];
-	$members =~ s/;.*//;
-	# "as above" in the Authors column repeats the row before.
-	my $pending = ($authors // '') =~ /^as above\b/i && defined $last
-	  ? $last
-	  : join(' ', $authors // '', $status // '') =~ /human review pending/i;
-	$last = $pending;
-	$row{$_} = { pending => $pending }
-	  for $members =~ /([A-Za-z_][A-Za-z0-9_.]*)/g;
+	if (!@head) {
+	    @head = map { lc } @cols;
+	    next;
+	}
+	next if $cols[0] =~ /^-+$/;
+	my %r;
+	@r{@head} = @cols;
+	my $review = $r{review} // $r{'human review'} // '';
+	my $all = join ' ', @cols;
+	my ($who, $when) = $review =~ /^approved by (\S.*?), (\d{4}-\d{2}-\d{2})\b/i;
+	my $pending = $all =~ /human review pending/i ? 1 : 0;
+	my $row = {
+	    members => $cols[0],
+	    source  => $r{source} // '',
+	    spec    => $r{spec} // '',
+	    authors => $r{authors} // '',
+	    status  => $r{status} // '',
+	    review  => $review,
+	    reviewed => defined $who && !$pending ? "$who, $when" : undef,
+	    pending => $pending,
+	};
+	$row->{index} = @rows + 1;
+	push @rows, $row;
     }
     close $p;
-    die "$prov: no Modules table\n" unless %row;
+    # The names inside backticks in a row's first column; a backticked
+    # list separated by spaces (libkitchen16's math row) gives each name.
+    # A member's own row names it before any ";" and doesn't begin
+    # "Changes to"; rows that change it ("changes to `cstart`") follow it
+    # in its list.
+    for my $row (@rows) {
+	my ($own, $changes) = split /;/, $row->{members}, 2;
+	$changes //= '';
+	if ($own =~ /^Changes to/i) {
+	    $changes = "$own $changes";
+	    $own = '';
+	}
+	for my $name ($own =~ /`([^`]+)`/g) {
+	    unshift @{$row_of{$_}}, $row for split /[\s,]+/, $name;
+	}
+	for my $name ($changes =~ /`([^`]+)`/g) {
+	    push @{$row_of{$_}}, $row for split /[\s,]+/, $name;
+	}
+    }
+    return (\@rows, \%row_of, $text);
+}
 
-    my (%seen, @prose, @missing);
-    my $pending = 0;
+# The large-model section of docs/AUDIT.txt: member => best score.
+sub read_audit ($audit, $libname) {
+    my %score;
+    open my $a, '<', $audit or return \%score;
+    my $in;
+    while (<$a>) {
+	if (/^== (\S+)/) {
+	    $in = $1 eq $libname;
+	    next;
+	}
+	$score{$1} = "$2 ($3)" if $in && /^(\w+)\s+\d+\s+([\d.]+)\s+[\d.]+\s+(.*?)\s*$/;
+    }
+    close $a;
+    return \%score;
+}
+
+my $fail = 0;
+for my $lib (@libs) {
+    my $root = dirname(dirname($lib));
+    my $prov = "$root/docs/LICENSE-PROVENANCE.md";
+    my ($rows, $row_of, $text) = read_provenance($prov);
+    die "$prov: no Modules table\n" unless @$rows;
+
+    my (%seen, %covered, %also, @order, @prose, @missing, @unreviewed);
     for my $src (@{$linked{$lib} // []}) {
 	my $member = basename($src) =~ s/\.[^.]*$//r;
 	next if $seen{$member}++;
-	if (my $r = $row{$member}) {
-	    $pending++ if $r->{pending};
+	if (my $list = $row_of->{$member}) {
+	    my ($r, @more) = @$list;
+	    push @order, $r unless $covered{$r};
+	    push @{$covered{$r}}, [$member, $src];
+	    $also{$r}{$_->{index}} = $_ for @more;
+	    # Reviewed only if every row that names it is.
+	    push @unreviewed, $member if grep { !$_->{reviewed} } @$list;
 	} elsif ($text =~ /`[^`\n]*\b\Q$member\E\b[^`\n]*`/) {
-	    push @prose, $member;
+	    push @prose, [$member, $src];
 	} else {
-	    push @missing, "$member ($src)";
+	    push @missing, [$member, $src];
 	}
     }
     die "$map: nothing linked from $lib\n" unless %seen;
     my $n = keys %seen;
-    say "check-provenance: $lib: $n modules linked, ",
-	$n - @prose - @missing, " in its Modules table ($pending with ",
-	"human review pending)";
-    say STDERR "check-provenance: warning: $lib: $_ is in $prov, ",
-	"but in no row of its Modules table" for @prose;
+    my $state = sub ($r) {
+	$r->{reviewed} ? "approved by $r->{reviewed}"
+	  : length $r->{review} ? "not approved ($r->{review})" : 'pending';
+    };
+    my $rel = sub ($src) { $src =~ s{.*/(?:libc16|libkitchen16)/}{}r };
+
+    if ($worksheet) {
+	my $score = read_audit("$root/docs/AUDIT.txt", basename($lib));
+	my $version = do { open my $v, '<', "$root/VERSION"; local $/; <$v> // '' };
+	chomp $version;
+	my $name = basename($lib);
+	say "## $name ($root, version $version)\n";
+	say "$n modules linked: ", $n - @prose - @missing, " named by ",
+	    @order + 0, " rows of the Modules table, ", @prose + 0,
+	    " prose-only, ", @missing + 0, " missing. ", @unreviewed + 0,
+	    " not yet reviewed. Rows are numbered as in the table.\n";
+	for my $r (sort { $a->{index} <=> $b->{index} } @order) {
+	    my @m = sort { $a->[0] cmp $b->[0] } @{$covered{$r}};
+	    say "### $name, table row $r->{index}: ",
+		join(', ', map { "`$_->[0]`" } @m), "\n";
+	    say "- **Row:** $r->{members}";
+	    say "- **Linked sources:** ", join(', ', map { "`" . $rel->($_->[1]) . "`" } @m);
+	    say "- **Spec:** $r->{spec}" if length $r->{spec};
+	    say "- **Authors:** $r->{authors}";
+	    say "- **Status:** $r->{status}";
+	    say "- **Similarity** (`docs/AUDIT.txt`, $name: best score, verdict): ",
+		join(', ', map { "`$_->[0]` " . ($score->{$_->[0]} // 'not listed') } @m);
+	    for my $i (sort { $a <=> $b } keys %{$also{$r} // {}}) {
+		my $o = $also{$r}{$i};
+		say "- **Also changed by table row $i** ($o->{members}): ", $state->($o);
+	    }
+	    say "- **Review:** ", $state->($r);
+	    say "";
+	}
+	for (["prose-only, no row", \@prose], ["missing", \@missing]) {
+	    my ($what, $list) = @$_;
+	    next unless @$list;
+	    say "### $name: $what\n";
+	    say "- `$_->[0]` (`", $rel->($_->[1]), "`)" for @$list;
+	    say "";
+	}
+	next;
+    }
+
+    say "check-provenance: $lib: $n modules linked, ", $n - @prose - @missing,
+	" in its Modules table (", @unreviewed + 0, " not reviewed)";
+    my $level = $release ? 'release' : 'warning';
+    for (@prose) {
+	say STDERR "check-provenance: $level: $lib: $_->[0] is in $prov, ",
+	    "but in no row of its Modules table";
+	$fail = 1 if $release;
+    }
     for (@missing) {
-	say STDERR "check-provenance: $lib: not in $prov: $_";
+	say STDERR "check-provenance: $lib: not in $prov: $_->[0] ($_->[1])";
+	$fail = 1;
+    }
+    if ($release && @unreviewed) {
+	say STDERR "check-provenance: release: $lib: no recorded human ",
+	    "review (\"approved by NAME, YYYY-MM-DD\" in a Review column) for: ",
+	    join ' ', @unreviewed;
 	$fail = 1;
     }
 }
