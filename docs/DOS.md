@@ -2,19 +2,23 @@
 
 How perl16's `PERL.EXE` behaves on DOS: installing it, where it looks for
 libraries, and what works differently from Perl 3 on Unix. This
-describes the M2 development build. The measurements and decisions behind
-it are in [M2-REPORT.md](M2-REPORT.md). There is no release yet. The
-development build is linked with Open Watcom's C runtime and must not be
-distributed (DESIGN.md, section 8).
+describes the build `make` makes since M3, linked with libc16 and
+libkitchen16 instead of Open Watcom's C runtime. The measurements and
+decisions behind it are in [M3-REPORT.md](M3-REPORT.md) and, for what
+M2 settled, [M2-REPORT.md](M2-REPORT.md). The M2 development build
+(`make dev`) still exists for comparison; where it behaves differently,
+"Development build" below says how. There is no release yet: M4 makes
+the release candidate, and no binary may be distributed before it.
 
 ## Requirements
 
 - An 8086 or 8088 PC or better, real mode, and DOS 3.0 or later. No DOS
   extender is needed.
-- Conventional memory: about 320 KB free to start, 376 KB for a short
-  script, and more for data (M2-REPORT.md, section 4.4). On a 640 KB
+- Conventional memory: about 310 KB free to start, 365 KB for a short
+  script, and more for data (M3-REPORT.md, section 4.4). On a 640 KB
   machine, plan on 512 KB free or more.
-- An 8087 is not needed. Floating point is emulated when there isn't one.
+- An 8087 is not needed, and isn't used if there is one: floating point
+  is done in software (libkitchen16).
 
 ## Installing
 
@@ -88,11 +92,9 @@ try the next directory.
 
 ## Limits
 
-- **Recursion.** About 150 levels of a simple recursive sub, or 65 with
-  `local()`, before `Stack overflow` (M2-REPORT.md, section 4). Perl
+- **Recursion.** About 205 levels of a simple recursive sub, or 100 with
+  `local()`, before `Stack overflow` (M3-REPORT.md, section 4). Perl
   guarantees 120 and 50 in its tests.
-  The runtime build (`make rt`, M3.4) goes deeper: about 205, or 100
-  with `local()`.
 - **Strings, arrays and hash tables.** One string, or the pointer table
   of one array, is limited to 64 KB, as in any large-model DOS program.
   A hash's table stops growing at 8,192 buckets. More keys still work,
@@ -112,16 +114,14 @@ Files are opened in text mode: `CR LF` reads as `\n`, and `\n` is
 written as `CR LF`. Use `binmode(FH)` for binary data. `-s` gives the
 size on disk, `CR`s included.
 
-- **Open files.** In the runtime build, five files can be open at
-  once beside `STDIN`, `STDOUT` and `STDERR` (libc16's `FOPEN_MAX` is
-  8). Another `open` fails with "Too many open files" until one is
+- **Open files.** Five files can be open at once beside `STDIN`,
+  `STDOUT` and `STDERR` (libc16's `FOPEN_MAX` is 8). Another `open` fails with "Too many open files" until one is
   closed. A duplicated handle such as `open(STDERR, ">&STDOUT")` counts
-  while it is open. The development build allows about 20.
-- **Disk and printer errors.** In the runtime build, a drive that isn't
-  ready, a write-protected disk or a printer out of paper never stops
-  Perl with DOS's "Abort, Retry, Fail?". The call fails, and `$!` says
-  why: "Permission denied (drive A: not ready)". The development
-  build leaves DOS's prompt in place.
+  while it is open.
+- **Disk and printer errors.** A drive that isn't ready, a
+  write-protected disk or a printer out of paper never stops Perl with
+  DOS's "Abort, Retry, Fail?". The call fails, and `$!` says why:
+  "Permission denied (drive A: not ready)".
 
 ## Globbing
 
@@ -146,9 +146,8 @@ rules:
   `>` or `|` in it. The child gets the environment, `%ENV` included. It
   needs conventional memory beside Perl's: small DOS commands fit, but a
   second `PERL.EXE` usually doesn't (DOS error 8).
-  - In the runtime build (`make rt`, M3.4), a command with `<`, `>` or
-    `|`, or one that can't be run directly (a `COMMAND.COM` built-in
-    such as `echo` or `set`), reaches `COMSPEC /C` exactly as written,
+  - A command with `<`, `>` or `|`, or one that can't be run directly
+    (a `COMMAND.COM` built-in such as `echo` or `set`), reaches `COMSPEC /C` exactly as written,
     double quotes, spaces and `%` included, with `%ENV` as the
     environment. The shell is the one `COMSPEC` named when Perl
     started; changing `$ENV{'COMSPEC'}` passes the new value on but
@@ -162,7 +161,8 @@ rules:
 - **Piped opens.** These are emulated with temporary files.
   `open(F, "cmd |")` runs `cmd` to completion first, then reads its
   output. `open(F, "| cmd")` collects what you print, and runs `cmd` on
-  it when F is closed.
+  it when F is closed. The temporary file goes where `-e`'s does, and is
+  removed when F is closed, or at exit.
 - **`sleep`** waits by polling the clock.
 
 ## Not available on DOS
@@ -197,16 +197,29 @@ nonzero exit without one.
 
 ## Known problems
 
+- **Speed.** Arithmetic takes about twice as long as in the development
+  build: every floating-point operation is a call into software
+  floating point. Output is written to DOS a piece at a time, since
+  libc16 doesn't buffer it, so a script that prints a lot is about half
+  again as slow ([gr-dos/libc16#34](https://github.com/gr-dos/libc16/issues/34)).
+  M3-REPORT.md, section 4, has the figures.
+
+## Development build
+
+`make dev` builds the M2 development build, with Open Watcom's C
+runtime, for comparison. It is never to be distributed (DESIGN.md,
+section 8). It differs from the above in these ways:
+
+- Recursion: about 150 levels of a simple sub, or 65 with `local()`.
+- About 20 files can be open at once.
+- A disk or printer error gives DOS's "Abort, Retry, Fail?" prompt.
 - Numbers are formatted by Open Watcom's `printf`. Ties round away from
   zero (`%.0f` of 2.5 gives 3), and the 20th significant digit can be
-  wrong, so `print 1/3` ends differently from Perl 3 on Unix. This goes
-  away with perl16's own runtime (M3).
-- In this build, temporary files for piped opens go where Open Watcom's
-  `tempnam()` puts them (`TMP`, else the root directory), not where
-  `-e`'s do.
-- In this build, comparisons with a NaN (`9**9**9 - 9**9**9`) or an
-  infinity can be wrong: Open Watcom's floating-point emulator makes a
-  NaN equal to every number, and `0 == 9**9**9` true. The runtime build
-  (`make rt`, M3.4) compares them as Perl 3 does on an IEEE machine,
-  and treats `-0.0` and the smallest numbers (below about `1e-308`)
-  correctly too (docs/M3-RUNTIME-AUDIT.md, section 11.7).
+  wrong, so `print 1/3` ends differently from Perl 3 on Unix.
+- Temporary files for piped opens go where Open Watcom's `tempnam()`
+  puts them (`TMP`, else the root directory), not where `-e`'s do.
+- Comparisons with a NaN (`9**9**9 - 9**9**9`) or an infinity can be
+  wrong: Open Watcom's floating-point emulator makes a NaN equal to
+  every number, and `0 == 9**9**9` true. `-0.0` and the smallest
+  numbers (below about `1e-308`) can be wrong too.
+- An 8087 is used if there is one.

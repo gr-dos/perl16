@@ -543,6 +543,10 @@ For M4 (release):
 
 ## 13. Reproducing
 
+Since M3, `make` builds the runtime build (M3-REPORT.md). The commands
+below are as they were for M2; today they are `make dev`, `make
+test-dev` and `make test-t-dev`.
+
     make                  # build/dev/PERL.EXE (prints the DGROUP check)
     make test             # smoke tests and install tests
     make test-t           # t/ suite

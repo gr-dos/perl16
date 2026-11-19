@@ -1,0 +1,24 @@
+Open Watcom Linker Version 2.0 beta (fixture for tests/link/run)
+Executable Image: T.EXE
+creating a DOS executable
+
+                        +----------------------+
+                        |   Memory Map         |
+                        +----------------------+
+
+Module: t.obj(t.c)
+0000:0000      main_
+Module: LIBC16L.LIB(/libc16/crt/memcpy.c)
+0000:0010      _memcpy
+
+
+                        +--------------------+
+                        |   Libraries Used   |
+                        +--------------------+
+
+LIBC16L.LIB
+
+
+                        +-----------------------+
+                        |   Linker Statistics   |
+                        +-----------------------+

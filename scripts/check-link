@@ -1,0 +1,104 @@
+#!/usr/bin/env perl
+
+use 5.036;
+use warnings;
+
+=head1 NAME
+
+check-link - check that an executable was linked from approved inputs only
+
+=head1 SYNOPSIS
+
+  scripts/check-link perl.map INPUT...
+
+=head1 DESCRIPTION
+
+The release gate of docs/DESIGN.md, section 8: runtime independence is
+checked at the link inputs, not inferred from the program running.
+INPUT... are the approved inputs, the objects and libraries the Makefile
+passes to wlink. The check fails if:
+
+=over
+
+=item *
+
+a module in the map (C<Module:> lines) comes from any other file, such
+as one of Open Watcom's libraries;
+
+=item *
+
+the map's C<Libraries Used> lists any other library;
+
+=item *
+
+an approved object has a default-library record (an OMF comment of
+class 9Fh), which a compile without C<-zl> leaves and which would
+make wlink search that library if C<option nodefaultlibs> were ever
+dropped.
+
+=back
+
+It prints how many modules came from objects and from each library.
+
+=cut
+
+my ($map, @inputs) = @ARGV;
+die "usage: $0 perl.map INPUT...\n" unless @inputs;
+my %approved = map { $_ => 1 } @inputs;
+my @fail;
+
+# Default-library records in the approved objects.
+for my $obj (grep { /\.obj$/i } @inputs) {
+    open my $fh, '<:raw', $obj or die "$obj: $!\n";
+    local $/;
+    my $data = <$fh>;
+    close $fh;
+    my $pos = 0;
+    while ($pos + 3 <= length $data) {
+	my ($type, $len) = unpack 'C v', substr($data, $pos, 3);
+	last if $pos + 3 + $len > length $data;
+	if ($type == 0x88 && $len >= 3) {
+	    my ($class, $text) = unpack 'x C a*', substr($data, $pos + 3, $len - 1);
+	    push @fail, "$obj: default library $text" if $class == 0x9f;
+	}
+	$pos += 3 + $len;
+    }
+}
+
+open my $fh, '<', $map or die "$map: $!\n";
+my (%count, $in_libs, $libs);
+while (<$fh>) {
+    if (/^Module:\s+(.*?)(?:\((.*)\))?\s*$/) {
+	my $file = $1;
+	if ($approved{$file}) {
+	    $count{$file =~ /\.lib$/i ? $file : 'objects'}++;
+	} else {
+	    push @fail, "module $2 from $file" if defined $2;
+	    push @fail, "module from $file" unless defined $2;
+	}
+    }
+    if (/\|\s+Libraries Used\s+\|/) {
+	$in_libs = 1;
+	$libs = 0;
+	next;
+    }
+    if ($in_libs) {
+	next if /^\s*\+-+\+\s*$/ || (!$libs && /^\s*$/);
+	if (/^\s*$/) {
+	    $in_libs = 0;
+	    next;
+	}
+	chomp;
+	$libs++;
+	push @fail, "library $_" unless $approved{$_};
+    }
+}
+close $fh;
+
+die "$map: no modules\n" unless %count;
+if (@fail) {
+    say STDERR "check-link: $map: not approved: $_" for @fail;
+    exit 1;
+}
+say "check-link: ", join ', ',
+    map { "$count{$_} modules from $_" } sort keys %count;

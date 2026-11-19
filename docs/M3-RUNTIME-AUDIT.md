@@ -862,13 +862,15 @@ libc16's, as libkitchen16's consumers do, and links `LIBK16L.LIB` with
   missing until they compile. They are on #16's list.
 
 
-### 11.7 The runtime build (M3.4, in progress)
+### 11.7 The runtime build (M3.4)
 
-`make rt` builds `build/rt/PERL.EXE`: the same sources compiled against
+`make rt` builds `build/rt/PERL.EXE`, and since the switch (below) so
+does `make`: the same sources compiled against
 libc16 0.15's and libkitchen16 0.02's headers and linked with their
 libraries alone (`option nodefaultlibs`), with no Open Watcom runtime.
-`make test-rt` runs the smoke and installation tests on it. The
-development build (`make`, `make test`) is unchanged and still passes.
+`make test-rt` ran the smoke and installation tests on it, and the
+development build (`make`, `make test`) was unchanged and still passed.
+The entries below use the targets' names as they were then.
 
 **How it compiles (#16).** `msdos/p16rt.h` is force-included in every
 module (`wcc -fi`). Under `P16_RT` it includes every libc16 and
@@ -1273,6 +1275,20 @@ exits with `P16EXIT`:
 - `make test-t-rt`: 53 of 72, the baseline.
 - `make audit`: all 25 sources compile.
 
+**The switch (#12).** The runtime build is the default:
+- `make`, `make test` and `make test-t` build and test it;
+- `make dev`, `make test-dev` and `make test-t-dev` are the
+  development build's, which stays as the reference;
+- `test-rt` and `test-t-rt` are gone, and `make rt` remains a name
+  for the runtime build.
+
+Its link fails unless `scripts/check-link` finds every module in the
+map from perl16's objects, `LIBC16L.LIB` or `LIBK16L.LIB`, and no
+object with a default-library record. `scripts/check-provenance` checks
+that every library module linked is in its library's provenance
+record. `EXETEST.EXE` and `ETEMPTST.EXE` are built like the runtime
+build. [M3-REPORT.md](M3-REPORT.md) has the result, the measurements
+and what is left for M4.
 
 ## 12. Issue breakdown
 
@@ -1306,10 +1322,15 @@ in 0.15, which perl16 now pins (#22; section 11.7).
 
 ## 13. Reproducing
 
-    make                  # build/dev/PERL.EXE; sha256 8fc09f08… (section 3)
+    make dev              # build/dev/PERL.EXE; sha256 8fc09f08… (section 3)
     make audit            # build/audit/report.txt (section 4) and
                           # build/audit/libc16/report.txt (section 5)
-    make test test-t      # the M2 baseline (DOSBox-X)
+    make test-dev test-t-dev
+                          # the M2 baseline (DOSBox-X)
+    make test test-t      # the runtime build (section 11.7)
+
+Until the switch in section 11.7, `make` built `build/dev/PERL.EXE`,
+and `make test` and `make test-t` tested it.
 
 Section 6.1's library sizes come from `build/dev/perl.map`: the
 `_TEXT` segment's size, and each library module's extent between

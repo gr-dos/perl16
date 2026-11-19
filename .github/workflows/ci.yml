@@ -6,6 +6,9 @@ on:
   pull_request:
 
 jobs:
+  # PERL.EXE as M3 builds it: libc16 and libkitchen16 instead of Open
+  # Watcom's runtime, checked at the link (scripts/check-link). A build
+  # failure or a failed smoke, installation or t/ case makes it fail.
   test:
     runs-on: ubuntu-24.04
     steps:
@@ -28,13 +31,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y dosbox-x bison patch
 
-      # The development build links Open Watcom's runtime and is never
-      # published (docs/DESIGN.md, section 8), so it is not uploaded.
+      # No binary is published before M4's release candidate, so none is
+      # uploaded.
       - name: Build
         run: make
 
-      # Smoke tests, then PERL.EXE installed on other drives and
-      # directories (@INC, -e and TEMP, -P).
+      # check-link's own test; smoke tests and the runtime build's own;
+      # then PERL.EXE installed on other drives and directories (@INC,
+      # -e and TEMP, -P, execl).
       - name: Test
         run: make test
 
@@ -43,18 +47,10 @@ jobs:
       - name: Test (t/ suite)
         run: make test-t
 
-      # What the objects need from a runtime with Open Watcom's headers,
-      # and recompiled against libc16's (docs/M3-RUNTIME-AUDIT.md).
-      - name: Audit
-        run: |
-          make audit
-          cat build/audit/report.txt
-          cat build/audit/libc16/report.txt
-
-  # The runtime build (M3.4): PERL.EXE linked with libc16 and
-  # libkitchen16 instead of Open Watcom's runtime. A build failure or a
-  # failed smoke, installation or t/ case makes it fail.
-  runtime:
+  # The development build (M2): Open Watcom's runtime, the reference the
+  # runtime build is compared with. Never published (docs/DESIGN.md,
+  # section 8).
+  dev:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
@@ -70,13 +66,18 @@ jobs:
           sudo apt-get install -y dosbox-x bison patch
 
       - name: Build
-        run: make rt
+        run: make dev
 
-      # Smoke tests, the installation tests and EXECLTST.EXE, then
-      # tests/smoke-rt: system() with quoted commands and %ENV (#22).
       - name: Test
-        run: make test-rt
+        run: make test-dev
 
-      # Perl 3.044's t/ suite against the development build's baseline.
       - name: Test (t/ suite)
-        run: make test-t-rt
+        run: make test-t-dev
+
+      # What the objects need from a runtime with Open Watcom's headers,
+      # and recompiled against libc16's (docs/M3-RUNTIME-AUDIT.md).
+      - name: Audit
+        run: |
+          make audit
+          cat build/audit/report.txt
+          cat build/audit/libc16/report.txt
