@@ -1,0 +1,30 @@
+#!/bin/sh
+# Self-test of scripts/check-link with fixture maps: a link from approved
+# inputs passes; one with a module and a library from Open Watcom's
+# runtime, an unlisted object, or an object with a default-library
+# record (OMF comment class 9Fh), fails.
+set -u
+dir=$(dirname "$0")
+tmp=${TMPDIR:-/tmp}/check-link.$$
+mkdir -p "$tmp" && trap 'rm -rf "$tmp"' EXIT
+check=$dir/../../scripts/check-link
+fail=0
+# t.obj: a THEADR record, and the same with a default-library comment.
+printf '\200\003\000\001t\213' > "$tmp/t.obj"
+cp "$tmp/t.obj" "$tmp/d.obj"
+printf '\210\010\000\000\237clibl\000' >> "$tmp/d.obj"
+sed "s|t.obj(|$tmp/t.obj(|" "$dir/good.map" > "$tmp/good.map"
+sed "s|t.obj(|$tmp/t.obj(|" "$dir/bad.map" > "$tmp/bad.map"
+sed "s|t.obj(|$tmp/d.obj(|" "$dir/good.map" > "$tmp/dlib.map"
+expect() {
+    want=$1; shift
+    if "$check" "$@" >"$tmp/out" 2>&1; then got=pass; else got=fail; fi
+    if [ "$got" = "$want" ]; then echo "ok: $want: $*" | sed "s|$tmp/||g"
+    else echo "NOT OK: wanted $want: $*" | sed "s|$tmp/||g"; cat "$tmp/out"; fail=1; fi
+}
+expect pass "$tmp/good.map" "$tmp/t.obj" LIBC16L.LIB
+expect fail "$tmp/bad.map" "$tmp/t.obj" LIBC16L.LIB
+expect fail "$tmp/good.map" LIBC16L.LIB
+expect fail "$tmp/good.map" "$tmp/t.obj"
+expect fail "$tmp/dlib.map" "$tmp/d.obj" LIBC16L.LIB
+exit $fail

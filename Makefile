@@ -230,12 +230,16 @@ $(RT)/execltst.obj: tests/tools/execltst.c $(P16_HEADERS) $(RT_SYMS) \
 # large-model heap grows the program's memory block above the stack,
 # outside DGROUP, and a child needs none of DGROUP (Open Watcom's spawn
 # needed near heap).
+# check-link (docs/DESIGN.md, section 8): every module in the map comes
+# from RT_OBJS or the two libraries, and no object asks for a default
+# library, so nothing of Open Watcom's runtime can be linked in.
 $(RT)/PERL.EXE: $(RT_OBJS) $(LIBC16L) $(LIBK16L) $(TOOLS_ENV) \
-  scripts/check-dgroup Makefile
+  scripts/check-dgroup scripts/check-link Makefile
 	$(WATCOM_ENV) && wlink $(RT_LDOPTS), map=$(RT)/perl.map \
 	  format dos name $@.tmp $(RT_OBJS:%=file %) \
 	  library $(LIBK16L) library $(LIBC16L)
 	perl scripts/check-dgroup $(RT)/perl.map $(RT_DGROUP_MIN_FREE)
+	@perl scripts/check-link $(RT)/perl.map $(RT_OBJS) $(LIBK16L) $(LIBC16L)
 	mv $@.tmp $@
 
 # The libraries' symbols, for scripts/check-w131.
@@ -376,6 +380,10 @@ audit: $(DEV_OBJS) $(LIBC16L) $(LIBK16L) $(TOOLS_ENV) scripts/audit-libc16
 	  $(PERL_NAMES:%=$(SRC)/%.c) $(PORT_NAMES:%=$(SRC)/%.c) \
 	  $(P16_NAMES:%=msdos/%.c)
 
+# scripts/check-link against fixture maps (tests/link/run).
+test-link:
+	sh tests/link/run
+
 reference:
 	sh scripts/fetch-reference build/reference
 
@@ -386,4 +394,4 @@ clean:
 # The assembled sources are made by one rule; make must not delete them.
 .SECONDARY:
 
-.PHONY: all rt test test-rt test-t test-t-rt variants measure audit reference clean
+.PHONY: all rt test test-rt test-t test-t-rt test-link variants measure audit reference clean
