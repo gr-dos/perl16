@@ -216,7 +216,7 @@ millisecond; `LIBC=1` adds `print` and `ctype`):
 
 | Target | What | Result |
 |---|---|---|
-| `make test` | `tests/link/run`; `tests/run-dos` on `tests/smoke` and on `tests/smoke-rt` (one DOSBox-X session each case); `tests/run-install` (one session, with C:, D: and a read-only E:) | 5 of 5; 25 of 25; 7 of 7; 36 of 36 |
+| `make test` | `tests/link/run`; `tests/run-dos` on `tests/smoke` and on `tests/smoke-rt` (one DOSBox-X session each case); `tests/run-install` (one session, with C:, D: and a read-only E:) | 6 of 6; 25 of 25; 7 of 7; 36 of 36 |
 | `make test-t` | Perl 3.044's `t/` against `tests/t-baseline.txt` | 53 of 72, the baseline |
 | `make test-dev` | the development build's smoke and installation tests | 24 pass, `fpfmt` todo; 35 of 35 |
 | `make test-t-dev` | `t/` under the development build | 53 of 72 |
